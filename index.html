@@ -45,9 +45,10 @@
           <div class="segmented" role="radiogroup" aria-label="Drawing tool">
             <button class="active" type="button" data-tool="draw" role="radio" aria-checked="true">Live</button>
             <button type="button" data-tool="erase" role="radio" aria-checked="false">Erase</button>
+            <button type="button" data-tool="stamp" role="radio" aria-checked="false">Stamp</button>
             <button type="button" data-tool="pan" role="radio" aria-checked="false">Pan</button>
           </div>
-          <p class="hint">Wheel pans. Ctrl or pinch zooms around the pointer. Drag to paint while paused or playing.</p>
+          <p class="hint">Wheel pans. Ctrl or pinch zooms around the pointer. Stamp places the selected preset without clearing the world.</p>
         </section>
 
         <section class="panel-section">
@@ -70,6 +71,24 @@
             <strong id="zoom-label">100%</strong>
           </label>
           <input id="zoom" type="range" min="18" max="360" value="100" />
+          <label class="toggle-row" for="age-colors">
+            <span>Age colors</span>
+            <input id="age-colors" type="checkbox" checked />
+          </label>
+        </section>
+
+        <section class="panel-section">
+          <h2>Population</h2>
+          <canvas id="population-chart" width="300" height="92" aria-label="Population history chart"></canvas>
+        </section>
+
+        <section class="panel-section">
+          <h2>RLE</h2>
+          <textarea id="rle-field" spellcheck="false" placeholder="Paste RLE here or export the current board"></textarea>
+          <div class="button-row">
+            <button id="import-rle" type="button">Import</button>
+            <button id="export-rle" type="button">Export</button>
+          </div>
         </section>
 
         <section class="panel-section stats">

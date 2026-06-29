@@ -3,11 +3,17 @@ import {
   clearBoard,
   createBoard,
   createRandomBoard,
+  getCell,
   getPopulation,
   nextGeneration,
   placePattern,
   wrap,
 } from './life.js';
+import {
+  encodeRle,
+  getPatternBounds,
+  parseRle,
+} from './patterns.js';
 import { presets } from './presets.js';
 
 const WORLD_WIDTH = 300;
@@ -29,6 +35,11 @@ const elements = {
   speedLabel: document.querySelector('#speed-label'),
   zoom: document.querySelector('#zoom'),
   zoomLabel: document.querySelector('#zoom-label'),
+  ageColors: document.querySelector('#age-colors'),
+  populationChart: document.querySelector('#population-chart'),
+  importRle: document.querySelector('#import-rle'),
+  exportRle: document.querySelector('#export-rle'),
+  rleField: document.querySelector('#rle-field'),
   presets: document.querySelector('#presets'),
   presetCount: document.querySelector('#preset-count'),
   generation: document.querySelector('#generation'),
@@ -42,9 +53,13 @@ const elements = {
 const state = {
   board: createBoard(WORLD_WIDTH, WORLD_HEIGHT),
   trail: new Uint8Array(WORLD_WIDTH * WORLD_HEIGHT),
+  age: new Uint16Array(WORLD_WIDTH * WORLD_HEIGHT),
+  populationHistory: [],
+  selectedPreset: null,
   playing: false,
   speed: 10,
   zoom: 1,
+  ageColors: true,
   panX: 0,
   panY: 0,
   tool: 'draw',
@@ -112,6 +127,7 @@ function paintCell(cellX, cellY, alive) {
 
   state.board.cells[index] = nextValue;
   state.trail[index] = alive ? 255 : 120;
+  state.age[index] = alive ? Math.max(state.age[index], 1) : 0;
   updateStats();
 }
 
@@ -123,8 +139,28 @@ function applyToolAt(clientX, clientY) {
 
   if (state.pointer.mode === 'draw') paintCell(cell.x, cell.y, true);
   if (state.pointer.mode === 'erase') paintCell(cell.x, cell.y, false);
+  if (state.pointer.mode === 'stamp') {
+    stampPattern(cell.x, cell.y);
+    state.pointer.active = false;
+  }
 
   state.pointer.lastCell = key;
+}
+
+function stampPattern(cellX, cellY) {
+  if (!state.selectedPreset) {
+    elements.activeNote.textContent = 'Choose a preset first, then stamp it anywhere on the world.';
+    return;
+  }
+
+  const bounds = getPatternBounds(state.selectedPreset.coordinates);
+  const originX = cellX - Math.floor(bounds.width / 2);
+  const originY = cellY - Math.floor(bounds.height / 2);
+
+  state.board = placePattern(state.board, state.selectedPreset.coordinates, originX, originY);
+  markLivingCells(255, 1);
+  elements.activeNote.textContent = `Stamped ${state.selectedPreset.name}.`;
+  updateStats();
 }
 
 function stepSimulation() {
@@ -134,10 +170,13 @@ function stepSimulation() {
   for (let i = 0; i < state.trail.length; i += 1) {
     if (next.cells[i]) {
       state.trail[i] = previousCells[i] ? Math.max(state.trail[i], 210) : 255;
+      state.age[i] = previousCells[i] ? Math.min(state.age[i] + 1, 1200) : 1;
     } else if (previousCells[i]) {
       state.trail[i] = Math.max(state.trail[i], 140);
+      state.age[i] = 0;
     } else {
       state.trail[i] = Math.floor(state.trail[i] * 0.84);
+      state.age[i] = 0;
     }
   }
 
@@ -152,32 +191,19 @@ function loadPreset(preset) {
   const originY = Math.floor(state.board.height / 2 - bounds.height / 2);
 
   state.board = placePattern(nextBoard, preset.coordinates, originX, originY);
-  state.trail.fill(0);
-
-  for (let i = 0; i < state.board.cells.length; i += 1) {
-    if (state.board.cells[i]) state.trail[i] = 255;
-  }
+  state.selectedPreset = preset;
+  resetCellEffects();
+  markLivingCells(255, 1);
 
   elements.activeNote.textContent = preset.note;
   updateStats();
-}
-
-function getPatternBounds(coordinates) {
-  const xs = coordinates.map(([x]) => x);
-  const ys = coordinates.map(([, y]) => y);
-  return {
-    width: Math.max(...xs) - Math.min(...xs) + 1,
-    height: Math.max(...ys) - Math.min(...ys) + 1,
-  };
+  updatePresetSelection();
 }
 
 function randomSoup() {
   state.board = createRandomBoard(WORLD_WIDTH, WORLD_HEIGHT, 0.18);
-  state.trail.fill(0);
-
-  for (let i = 0; i < state.board.cells.length; i += 1) {
-    if (state.board.cells[i]) state.trail[i] = 230;
-  }
+  resetCellEffects();
+  markLivingCells(230, 1);
 
   elements.activeNote.textContent = 'Random soup: turbulence first, then islands, oscillators, and debris.';
   updateStats();
@@ -185,9 +211,60 @@ function randomSoup() {
 
 function clearWorld() {
   state.board = clearBoard(state.board);
-  state.trail.fill(0);
+  resetCellEffects();
   elements.activeNote.textContent = 'The world is empty. Draw a seed or load a preset.';
   updateStats();
+}
+
+function importRle() {
+  try {
+    const pattern = parseRle(elements.rleField.value);
+    const nextBoard = clearBoard(state.board);
+    const originX = Math.floor(state.board.width / 2 - pattern.width / 2);
+    const originY = Math.floor(state.board.height / 2 - pattern.height / 2);
+
+    state.board = placePattern(nextBoard, pattern.coordinates, originX, originY);
+    resetCellEffects();
+    markLivingCells(255, 1);
+    elements.activeNote.textContent = `Imported RLE pattern (${pattern.width} x ${pattern.height}).`;
+    updateStats();
+  } catch (error) {
+    elements.activeNote.textContent = error instanceof Error ? error.message : 'Could not import that RLE pattern.';
+  }
+}
+
+function exportRle() {
+  const coordinates = getLiveCoordinates();
+
+  elements.rleField.value = encodeRle(coordinates);
+  elements.activeNote.textContent = `Exported ${coordinates.length.toLocaleString()} live cells as RLE.`;
+}
+
+function getLiveCoordinates() {
+  const coordinates = [];
+
+  for (let y = 0; y < state.board.height; y += 1) {
+    for (let x = 0; x < state.board.width; x += 1) {
+      if (getCell(state.board, x, y)) coordinates.push([x, y]);
+    }
+  }
+
+  return coordinates;
+}
+
+function resetCellEffects() {
+  state.trail.fill(0);
+  state.age.fill(0);
+  state.populationHistory = [];
+}
+
+function markLivingCells(trail = 230, age = 1) {
+  for (let i = 0; i < state.board.cells.length; i += 1) {
+    if (state.board.cells[i]) {
+      state.trail[i] = Math.max(state.trail[i], trail);
+      state.age[i] = Math.max(state.age[i], age);
+    }
+  }
 }
 
 function render() {
@@ -269,9 +346,10 @@ function drawCells(cellSize) {
       if (!alive && trail < 8) continue;
 
       if (alive) {
-        ctx.shadowColor = 'rgba(94, 234, 212, 0.58)';
+        const color = getAliveColor(state.age[index], trail);
+        ctx.shadowColor = color.shadow;
         ctx.shadowBlur = cellSize > 5 ? Math.min(14, cellSize * 0.8) : 0;
-        ctx.fillStyle = trail > 245 ? '#e7fffb' : '#5eead4';
+        ctx.fillStyle = color.fill;
       } else {
         ctx.shadowBlur = 0;
         ctx.fillStyle = `rgba(56, 189, 248, ${trail / 760})`;
@@ -289,6 +367,41 @@ function drawCells(cellSize) {
   ctx.shadowBlur = 0;
 }
 
+function getAliveColor(age, trail) {
+  if (!state.ageColors) {
+    return {
+      fill: trail > 245 ? '#e7fffb' : '#5eead4',
+      shadow: 'rgba(94, 234, 212, 0.58)',
+    };
+  }
+
+  if (age <= 2 || trail > 248) {
+    return {
+      fill: '#f7fffb',
+      shadow: 'rgba(204, 251, 241, 0.72)',
+    };
+  }
+
+  if (age < 12) {
+    return {
+      fill: '#5eead4',
+      shadow: 'rgba(94, 234, 212, 0.58)',
+    };
+  }
+
+  if (age < 60) {
+    return {
+      fill: '#38bdf8',
+      shadow: 'rgba(56, 189, 248, 0.46)',
+    };
+  }
+
+  return {
+    fill: '#a5b4fc',
+    shadow: 'rgba(165, 180, 252, 0.42)',
+  };
+}
+
 function drawTorusHints(width, height) {
   ctx.save();
   ctx.fillStyle = 'rgba(148, 163, 184, 0.55)';
@@ -297,14 +410,71 @@ function drawTorusHints(width, height) {
   ctx.restore();
 }
 
+function drawPopulationChart() {
+  const chart = elements.populationChart;
+  const chartCtx = chart.getContext('2d');
+  const width = chart.width;
+  const height = chart.height;
+  const points = state.populationHistory;
+
+  chartCtx.clearRect(0, 0, width, height);
+  chartCtx.fillStyle = 'rgba(3, 7, 18, 0.82)';
+  chartCtx.fillRect(0, 0, width, height);
+
+  chartCtx.strokeStyle = 'rgba(148, 163, 184, 0.12)';
+  chartCtx.lineWidth = 1;
+  chartCtx.beginPath();
+  for (let x = 0; x <= width; x += width / 4) {
+    chartCtx.moveTo(x, 0);
+    chartCtx.lineTo(x, height);
+  }
+  for (let y = 0; y <= height; y += height / 4) {
+    chartCtx.moveTo(0, y);
+    chartCtx.lineTo(width, y);
+  }
+  chartCtx.stroke();
+
+  if (points.length < 2) return;
+
+  const maxPopulation = Math.max(...points.map(({ population }) => population), 1);
+  chartCtx.strokeStyle = '#5eead4';
+  chartCtx.lineWidth = 2;
+  chartCtx.beginPath();
+
+  points.forEach(({ population }, index) => {
+    const x = (index / (points.length - 1)) * (width - 12) + 6;
+    const y = height - 8 - (population / maxPopulation) * (height - 16);
+
+    if (index === 0) chartCtx.moveTo(x, y);
+    else chartCtx.lineTo(x, y);
+  });
+
+  chartCtx.stroke();
+
+  chartCtx.fillStyle = 'rgba(94, 234, 212, 0.12)';
+  chartCtx.lineTo(width - 6, height - 8);
+  chartCtx.lineTo(6, height - 8);
+  chartCtx.closePath();
+  chartCtx.fill();
+}
+
 function updateStats() {
   const population = getPopulation(state.board);
   const density = population / state.board.cells.length;
+  const previous = state.populationHistory[state.populationHistory.length - 1];
+
+  if (previous?.generation === state.board.generation) {
+    previous.population = population;
+  } else {
+    state.populationHistory.push({ generation: state.board.generation, population });
+    if (state.populationHistory.length > 160) state.populationHistory.shift();
+  }
 
   elements.generation.textContent = state.board.generation.toLocaleString();
   elements.population.textContent = population.toLocaleString();
   elements.density.textContent = `${(density * 100).toFixed(2)}%`;
   elements.boardSize.textContent = `${state.board.width} x ${state.board.height}`;
+  drawPopulationChart();
 }
 
 function updatePlayButton() {
@@ -331,12 +501,19 @@ function renderPresets() {
     const button = document.createElement('button');
     button.className = 'preset';
     button.type = 'button';
+    button.dataset.presetId = preset.id;
     button.innerHTML = `
       <span class="preset-name">${preset.name}</span>
       <span class="preset-note">${preset.note}</span>
     `;
     button.addEventListener('click', () => loadPreset(preset));
     elements.presets.append(button);
+  }
+}
+
+function updatePresetSelection() {
+  for (const button of elements.presets.querySelectorAll('[data-preset-id]')) {
+    button.classList.toggle('active', button.dataset.presetId === state.selectedPreset?.id);
   }
 }
 
@@ -416,12 +593,24 @@ function bindEvents() {
     setZoom(Number(elements.zoom.value) / 100);
   });
 
+  elements.ageColors.addEventListener('change', () => {
+    state.ageColors = elements.ageColors.checked;
+  });
+
+  elements.importRle.addEventListener('click', () => {
+    importRle();
+  });
+
+  elements.exportRle.addEventListener('click', () => {
+    exportRle();
+  });
+
   for (const button of elements.toolButtons) {
     button.addEventListener('click', () => setTool(button.dataset.tool));
   }
 
   window.addEventListener('keydown', (event) => {
-    if (event.target instanceof HTMLInputElement) return;
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
 
     if (event.key === ' ') {
       event.preventDefault();
@@ -431,7 +620,8 @@ function bindEvents() {
     if (event.key === '.') stepSimulation();
     if (event.key === '1') setTool('draw');
     if (event.key === '2') setTool('erase');
-    if (event.key === '3') setTool('pan');
+    if (event.key === '3') setTool('stamp');
+    if (event.key === '4') setTool('pan');
   });
 }
 
