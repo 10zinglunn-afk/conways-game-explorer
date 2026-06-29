@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Conway's Game Explorer</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <canvas id="world" aria-label="Conway's Game of Life board"></canvas>
+
+      <section class="topbar" aria-label="Simulation controls">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>Conway's Game</h1>
+            <p>Toroidal world, finite canvas</p>
+          </div>
+        </div>
+
+        <div class="transport">
+          <button id="play-toggle" class="primary" type="button" aria-label="Play simulation">
+            <span class="button-icon" aria-hidden="true">▶</span>
+            <span id="play-label">Play</span>
+          </button>
+          <button id="step" type="button" aria-label="Step one generation">
+            <span class="button-icon" aria-hidden="true">↦</span>
+            <span>Step</span>
+          </button>
+          <button id="clear" type="button" aria-label="Clear board">
+            <span class="button-icon" aria-hidden="true">⌫</span>
+            <span>Clear</span>
+          </button>
+          <button id="randomize" type="button" aria-label="Create random live cell soup">
+            <span class="button-icon" aria-hidden="true">✦</span>
+            <span>Soup</span>
+          </button>
+        </div>
+      </section>
+
+      <aside class="panel" aria-label="Explorer panel">
+        <section class="panel-section">
+          <h2>Draw</h2>
+          <div class="segmented" role="radiogroup" aria-label="Drawing tool">
+            <button class="active" type="button" data-tool="draw" role="radio" aria-checked="true">Live</button>
+            <button type="button" data-tool="erase" role="radio" aria-checked="false">Erase</button>
+            <button type="button" data-tool="pan" role="radio" aria-checked="false">Pan</button>
+          </div>
+          <p class="hint">Wheel pans. Ctrl or pinch zooms around the pointer. Drag to paint while paused or playing.</p>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading">
+            <h2>Presets</h2>
+            <span id="preset-count"></span>
+          </div>
+          <div id="presets" class="preset-list"></div>
+        </section>
+
+        <section class="panel-section">
+          <h2>Tempo</h2>
+          <label class="range-row" for="speed">
+            <span>Speed</span>
+            <strong id="speed-label">10 gen/s</strong>
+          </label>
+          <input id="speed" type="range" min="1" max="40" value="10" />
+          <label class="range-row" for="zoom">
+            <span>Zoom</span>
+            <strong id="zoom-label">100%</strong>
+          </label>
+          <input id="zoom" type="range" min="18" max="360" value="100" />
+        </section>
+
+        <section class="panel-section stats">
+          <h2>World</h2>
+          <dl>
+            <div>
+              <dt>Generation</dt>
+              <dd id="generation">0</dd>
+            </div>
+            <div>
+              <dt>Population</dt>
+              <dd id="population">0</dd>
+            </div>
+            <div>
+              <dt>Density</dt>
+              <dd id="density">0%</dd>
+            </div>
+            <div>
+              <dt>Board</dt>
+              <dd id="board-size">300 × 200</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="panel-section rules">
+          <h2>Rules</h2>
+          <p>Dead cells with exactly 3 live neighbors are born. Live cells survive with 2 or 3 neighbors; otherwise they fade out.</p>
+        </section>
+      </aside>
+
+      <div class="hud" aria-live="polite">
+        <span id="active-note">Load a preset, draw a seed, or start with soup.</span>
+      </div>
+    </main>
+
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>

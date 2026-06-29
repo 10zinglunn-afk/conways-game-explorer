@@ -1,0 +1,11 @@
+{
+  "name": "conways-game-explorer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "test": "node --test",
+    "start": "node server.mjs"
+  }
+}
