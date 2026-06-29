@@ -8,6 +8,14 @@
   </head>
   <body>
     <main class="app-shell">
+      <section id="intro-layer" class="intro-layer" aria-label="The Game of Life intro">
+        <canvas id="intro-canvas" aria-hidden="true"></canvas>
+        <div class="intro-chrome">
+          <div class="intro-scanline" aria-hidden="true"></div>
+          <p id="intro-prompt" class="intro-prompt">LOADING</p>
+        </div>
+      </section>
+
       <canvas id="world" aria-label="Conway's Game of Life board"></canvas>
 
       <section class="topbar" aria-label="Simulation controls">
@@ -17,6 +25,11 @@
             <h1>Conway's Game</h1>
             <p>Toroidal world, finite canvas</p>
           </div>
+        </div>
+
+        <div class="mode-switch" role="radiogroup" aria-label="Explorer mode">
+          <button id="mode-playground" class="active" type="button" role="radio" aria-checked="true">Playground</button>
+          <button id="mode-dev" type="button" role="radio" aria-checked="false">Dev</button>
         </div>
 
         <div class="transport">
@@ -49,6 +62,25 @@
             <button type="button" data-tool="pan" role="radio" aria-checked="false">Pan</button>
           </div>
           <p class="hint">Wheel pans. Ctrl or pinch zooms around the pointer. Stamp places the selected preset without clearing the world.</p>
+        </section>
+
+        <section id="dev-panel" class="panel-section dev-panel" aria-label="Dev Mode workbench">
+          <div class="section-heading">
+            <h2>Dev Lab</h2>
+            <span>Signals</span>
+          </div>
+          <div class="dev-grid">
+            <button type="button" data-dev-component="glider">Glider signal</button>
+            <button type="button" data-dev-component="gosper-gun">Gun source</button>
+            <button type="button" data-dev-component="eater">Eater</button>
+            <button type="button" data-dev-component="collision-pair">Collision pair</button>
+          </div>
+          <div class="dev-actions" aria-label="Claim checks">
+            <button type="button" data-dev-claim="period">Check period</button>
+            <button type="button" data-dev-claim="drift">Check drift</button>
+            <button type="button" data-dev-claim="population">Snapshot</button>
+          </div>
+          <p id="dev-output" class="dev-output">Choose a component, stamp it, then run a claim check.</p>
         </section>
 
         <section class="panel-section">

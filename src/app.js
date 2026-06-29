@@ -10,10 +10,16 @@ import {
   wrap,
 } from './life.js';
 import {
+  describeDriftClaim,
+  describePeriodClaim,
+  describePopulationSnapshot,
+} from './dev-tools.js';
+import {
   encodeRle,
   getPatternBounds,
   parseRle,
 } from './patterns.js';
+import { mountLandingIntro } from './landing.js';
 import { presets } from './presets.js';
 
 const WORLD_WIDTH = 300;
@@ -48,6 +54,15 @@ const elements = {
   boardSize: document.querySelector('#board-size'),
   activeNote: document.querySelector('#active-note'),
   toolButtons: document.querySelectorAll('[data-tool]'),
+  introLayer: document.querySelector('#intro-layer'),
+  introCanvas: document.querySelector('#intro-canvas'),
+  introPrompt: document.querySelector('#intro-prompt'),
+  modePlayground: document.querySelector('#mode-playground'),
+  modeDev: document.querySelector('#mode-dev'),
+  devPanel: document.querySelector('#dev-panel'),
+  devOutput: document.querySelector('#dev-output'),
+  devComponentButtons: document.querySelectorAll('[data-dev-component]'),
+  devClaimButtons: document.querySelectorAll('[data-dev-claim]'),
 };
 
 const state = {
@@ -59,6 +74,7 @@ const state = {
   playing: false,
   speed: 10,
   zoom: 1,
+  mode: 'playground',
   ageColors: true,
   panX: 0,
   panY: 0,
@@ -72,6 +88,37 @@ const state = {
   },
   lastTick: 0,
   accumulator: 0,
+};
+
+const devComponents = {
+  glider: {
+    name: 'Glider signal',
+    note: 'Selected a glider signal. Stamp it on a clear lane, then check drift after four generations.',
+    coordinates: findPreset('glider').coordinates,
+  },
+  'gosper-gun': {
+    name: 'Gun source',
+    note: 'Selected the Gosper gun. Stamp it with open space to the right and watch the signal stream.',
+    coordinates: findPreset('gosper-gun').coordinates,
+  },
+  eater: {
+    name: 'Eater',
+    note: 'Selected a stable eater. Place it near a lane to experiment with signal absorption.',
+    coordinates: [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [3, 1],
+      [1, 2],
+      [3, 2],
+      [2, 3],
+    ],
+  },
+  'collision-pair': {
+    name: 'Collision pair',
+    note: 'Selected two gliders as a collision seed. Use step mode to inspect the interaction.',
+    coordinates: findPreset('glider-pair').coordinates,
+  },
 };
 
 function resizeCanvas() {
@@ -493,6 +540,54 @@ function setTool(tool) {
   }
 }
 
+function setMode(mode) {
+  state.mode = mode;
+  const devMode = mode === 'dev';
+
+  document.querySelector('.app-shell').classList.toggle('dev-mode', devMode);
+  elements.modePlayground.classList.toggle('active', !devMode);
+  elements.modeDev.classList.toggle('active', devMode);
+  elements.modePlayground.setAttribute('aria-checked', String(!devMode));
+  elements.modeDev.setAttribute('aria-checked', String(devMode));
+
+  if (devMode) {
+    elements.activeNote.textContent = 'Dev Mode: stamp components, run checks, and treat gliders as signals.';
+  } else {
+    elements.activeNote.textContent = 'Playground Mode: explore, draw, stamp presets, and watch the world evolve.';
+  }
+}
+
+function selectDevComponent(componentId) {
+  const component = devComponents[componentId];
+
+  if (!component) return;
+
+  state.selectedPreset = {
+    id: `dev-${componentId}`,
+    name: component.name,
+    note: component.note,
+    coordinates: component.coordinates,
+  };
+  setTool('stamp');
+  updatePresetSelection();
+  elements.devOutput.textContent = `${component.name} ready. Click the world to stamp it.`;
+  elements.activeNote.textContent = component.note;
+}
+
+function runDevClaim(claim) {
+  if (claim === 'period') {
+    elements.devOutput.textContent = describePeriodClaim(state.board);
+  }
+
+  if (claim === 'drift') {
+    elements.devOutput.textContent = describeDriftClaim(state.board);
+  }
+
+  if (claim === 'population') {
+    elements.devOutput.textContent = describePopulationSnapshot(state.board);
+  }
+}
+
 function renderPresets() {
   elements.presetCount.textContent = `${presets.length}`;
   elements.presets.innerHTML = '';
@@ -597,6 +692,18 @@ function bindEvents() {
     state.ageColors = elements.ageColors.checked;
   });
 
+  elements.modePlayground.addEventListener('click', () => setMode('playground'));
+
+  elements.modeDev.addEventListener('click', () => setMode('dev'));
+
+  for (const button of elements.devComponentButtons) {
+    button.addEventListener('click', () => selectDevComponent(button.dataset.devComponent));
+  }
+
+  for (const button of elements.devClaimButtons) {
+    button.addEventListener('click', () => runDevClaim(button.dataset.devClaim));
+  }
+
   elements.importRle.addEventListener('click', () => {
     importRle();
   });
@@ -654,9 +761,25 @@ function boot() {
   renderPresets();
   updateStats();
   updatePlayButton();
+  setMode('playground');
   bindEvents();
   randomSoup();
+  mountLandingIntro({
+    layer: elements.introLayer,
+    canvas: elements.introCanvas,
+    prompt: elements.introPrompt,
+  });
   requestAnimationFrame(loop);
 }
 
 boot();
+
+function findPreset(id) {
+  const preset = presets.find((candidate) => candidate.id === id);
+
+  if (!preset) {
+    throw new Error(`Missing required preset: ${id}`);
+  }
+
+  return preset;
+}
