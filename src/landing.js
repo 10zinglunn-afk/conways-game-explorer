@@ -152,6 +152,7 @@ export function mountLandingIntro({
   layer,
   canvas,
   prompt,
+  startButton,
   onComplete = () => {},
   now = () => performance.now(),
   raf = (callback) => requestAnimationFrame(callback),
@@ -185,11 +186,13 @@ export function mountLandingIntro({
   function start() {
     if (state.phase !== 'ready' || state.completed) return;
 
+    if (navigator.vibrate) navigator.vibrate(35);
     state.phase = 'running';
     state.board = createIntroBoard(introTitle);
     state.startedAt = now();
     state.lastStepAt = state.startedAt;
     prompt.textContent = 'RUNNING LIFE';
+    if (startButton) startButton.disabled = true;
     layer.classList.add('intro-layer--running');
   }
 
@@ -216,7 +219,8 @@ export function mountLandingIntro({
 
       if (state.visibleCount >= introTitle.length) {
         state.phase = 'ready';
-        prompt.textContent = 'PRESS START';
+        prompt.textContent = 'START';
+        if (startButton) startButton.disabled = false;
         layer.classList.add('intro-layer--ready');
       }
     }
@@ -245,6 +249,7 @@ export function mountLandingIntro({
   window.addEventListener('resize', resize);
   window.addEventListener('keydown', handleKeydown);
   layer.addEventListener('click', start);
+  if (startButton) startButton.addEventListener('click', start);
   raf(tick);
 
   return {
@@ -254,6 +259,7 @@ export function mountLandingIntro({
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', handleKeydown);
       layer.removeEventListener('click', start);
+      if (startButton) startButton.removeEventListener('click', start);
     },
   };
 }
@@ -318,13 +324,13 @@ function drawBackground(ctx, width, height) {
 }
 
 function drawBoard(ctx, board, width, height, phase) {
-  const maxCellWidth = width * 0.84 / board.width;
-  const maxCellHeight = height * 0.26 / board.height;
-  const cellSize = Math.max(4, Math.min(18, Math.floor(Math.min(maxCellWidth, maxCellHeight))));
+  const maxCellWidth = width * 0.72 / board.width;
+  const maxCellHeight = height * 0.2 / board.height;
+  const cellSize = Math.max(4, Math.min(14, Math.floor(Math.min(maxCellWidth, maxCellHeight))));
   const boardWidth = board.width * cellSize;
   const boardHeight = board.height * cellSize;
   const originX = Math.floor((width - boardWidth) / 2);
-  const originY = Math.floor(height * 0.42 - boardHeight / 2);
+  const originY = Math.floor(height * 0.39 - boardHeight / 2);
   const inset = Math.max(1, Math.floor(cellSize * 0.12));
 
   ctx.save();

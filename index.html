@@ -12,7 +12,10 @@
         <canvas id="intro-canvas" aria-hidden="true"></canvas>
         <div class="intro-chrome">
           <div class="intro-scanline" aria-hidden="true"></div>
-          <p id="intro-prompt" class="intro-prompt">LOADING</p>
+          <button id="intro-start" class="intro-start" type="button" disabled>
+            <span id="intro-prompt">LOADING</span>
+          </button>
+          <p class="intro-help">Click start or press Enter</p>
         </div>
       </section>
 
@@ -25,11 +28,6 @@
             <h1>Conway's Game</h1>
             <p>Toroidal world, finite canvas</p>
           </div>
-        </div>
-
-        <div class="mode-switch" role="radiogroup" aria-label="Explorer mode">
-          <button id="mode-playground" class="active" type="button" role="radio" aria-checked="true">Playground</button>
-          <button id="mode-dev" type="button" role="radio" aria-checked="false">Dev</button>
         </div>
 
         <div class="transport">
@@ -53,27 +51,61 @@
       </section>
 
       <aside class="panel" aria-label="Explorer panel">
-        <section class="panel-section">
-          <h2>Draw</h2>
-          <div class="segmented" role="radiogroup" aria-label="Drawing tool">
-            <button class="active" type="button" data-tool="draw" role="radio" aria-checked="true">Live</button>
-            <button type="button" data-tool="erase" role="radio" aria-checked="false">Erase</button>
-            <button type="button" data-tool="stamp" role="radio" aria-checked="false">Stamp</button>
-            <button type="button" data-tool="pan" role="radio" aria-checked="false">Pan</button>
+        <section class="panel-section mode-panel">
+          <h2>Mode</h2>
+          <div class="mode-switch" role="radiogroup" aria-label="Explorer mode">
+            <button id="mode-playground" class="active" type="button" role="radio" aria-checked="true">
+              <span>Playground</span>
+              <small>Explore patterns</small>
+            </button>
+            <button id="mode-dev" type="button" role="radio" aria-checked="false">
+              <span>Dev Lab</span>
+              <small>Build logic</small>
+            </button>
+            <button id="mode-community" type="button" role="radio" aria-checked="false">
+              <span>Community</span>
+              <small>Save & remix</small>
+            </button>
           </div>
-          <p class="hint">Wheel pans. Ctrl or pinch zooms around the pointer. Stamp places the selected preset without clearing the world.</p>
+        </section>
+
+        <section class="panel-section walkthrough-panel playground-panel">
+          <h2>First Walkthrough</h2>
+          <ol class="walkthrough-list">
+            <li>Start blank. Click or drag cells to draw a seed.</li>
+            <li>Paused only: click a lit cell once to turn it off.</li>
+            <li>Drag a pattern card onto the board, or click a card and then click the board.</li>
+            <li>Press Play and watch what survives, travels, or explodes.</li>
+          </ol>
+        </section>
+
+        <section class="panel-section draw-panel playground-panel">
+          <h2>Cells</h2>
+          <div class="segmented" role="radiogroup" aria-label="Drawing tool">
+            <button class="active" type="button" data-tool="draw" role="radio" aria-checked="true">Draw</button>
+            <button type="button" data-tool="erase" role="radio" aria-checked="false">Erase</button>
+            <button type="button" data-tool="stamp" role="radio" aria-checked="false">Place</button>
+          </div>
+          <p class="hint">Draw adds cells. When paused, clicking a lit cell with Draw removes it. Place turns on paste mode; click Place again to turn it off.</p>
         </section>
 
         <section id="dev-panel" class="panel-section dev-panel" aria-label="Dev Mode workbench">
           <div class="section-heading">
-            <h2>Dev Lab</h2>
+            <h2>Logic Kit</h2>
             <span>Signals</span>
           </div>
+          <p class="hint">Build with moving bits: signals, clocks, stops, and collisions.</p>
           <div class="dev-grid">
-            <button type="button" data-dev-component="glider">Glider signal</button>
-            <button type="button" data-dev-component="gosper-gun">Gun source</button>
-            <button type="button" data-dev-component="eater">Eater</button>
-            <button type="button" data-dev-component="collision-pair">Collision pair</button>
+            <button type="button" data-dev-component="glider"><span>Signal</span><small>moving bit</small></button>
+            <button type="button" data-dev-component="gosper-gun"><span>Clock</span><small>glider stream</small></button>
+            <button type="button" data-dev-component="eater"><span>Stop</span><small>absorbs signal</small></button>
+            <button type="button" data-dev-component="collision-pair"><span>Collide</span><small>two signals</small></button>
+          </div>
+          <div class="logic-grid" aria-label="Logic demos">
+            <button type="button" data-dev-demo="and">AND demo</button>
+            <button type="button" data-dev-demo="or">OR demo</button>
+            <button type="button" data-dev-demo="xor">XOR demo</button>
+            <button type="button" data-dev-demo="adder">Adder plan</button>
           </div>
           <div class="dev-actions" aria-label="Claim checks">
             <button type="button" data-dev-claim="period">Check period</button>
@@ -83,48 +115,114 @@
           <p id="dev-output" class="dev-output">Choose a component, stamp it, then run a claim check.</p>
         </section>
 
-        <section class="panel-section">
+        <section id="community-panel" class="panel-section community-panel" aria-label="Community workbench">
           <div class="section-heading">
-            <h2>Presets</h2>
+            <h2>Community Lab</h2>
+            <span id="community-count">0 builds</span>
+          </div>
+          <p class="hint">Local-first prototype for accounts, saves, publishing, stars, clones, and trending.</p>
+
+          <div id="community-auth" class="community-auth" aria-label="Cloud sign in" hidden>
+            <div class="community-auth-status">
+              <span id="community-cloud-status">Cloud: local</span>
+              <button id="community-sign-out" type="button" hidden>Sign out</button>
+            </div>
+            <div class="community-auth-row">
+              <input id="community-auth-email" type="email" autocomplete="email" placeholder="email@example.com" />
+              <button id="send-magic-link" type="button">Send link</button>
+            </div>
+            <p id="community-auth-output">Local drafts active.</p>
+          </div>
+
+          <div class="community-form" aria-label="Local profile">
+            <label for="profile-name">Name</label>
+            <input id="profile-name" type="text" autocomplete="name" placeholder="Ada Lovelace" />
+            <label for="profile-email">Email</label>
+            <input id="profile-email" type="email" autocomplete="email" placeholder="ada@example.com" />
+            <button id="save-profile" type="button">Create Account</button>
+          </div>
+
+          <div class="community-form" aria-label="Save current creation">
+            <label for="creation-title">Creation title</label>
+            <input id="creation-title" type="text" placeholder="Glider clock" />
+            <label for="creation-description">Description</label>
+            <textarea id="creation-description" spellcheck="true" placeholder="What does this pattern teach or do?"></textarea>
+            <label for="creation-tags">Tags</label>
+            <input id="creation-tags" type="text" placeholder="glider, logic, oscillator" />
+            <div class="button-row">
+              <button id="save-creation" type="button">Save Draft</button>
+              <button id="publish-creation" type="button">Publish</button>
+            </div>
+            <button id="copy-share-payload" class="wide-action" type="button">Copy Share Payload</button>
+          </div>
+
+          <p id="community-output" class="dev-output">Create a local account, then save the board as your first build.</p>
+
+          <div class="community-list-block">
+            <h3>Your Builds</h3>
+            <div id="community-list" class="community-list"></div>
+          </div>
+
+          <div class="community-list-block">
+            <h3>Trending</h3>
+            <div id="trending-list" class="community-list"></div>
+          </div>
+        </section>
+
+        <section class="panel-section library-panel playground-panel">
+          <div class="section-heading">
+            <h2>Pattern Library</h2>
             <span id="preset-count"></span>
           </div>
+          <p class="hint">Drag a card onto the board. Click a card to select it and read what it does.</p>
+          <div id="pattern-tabs" class="pattern-tabs" role="tablist" aria-label="Pattern groups"></div>
           <div id="presets" class="preset-list"></div>
         </section>
 
-        <section class="panel-section">
+        <section class="panel-section tempo-panel">
           <h2>Tempo</h2>
           <label class="range-row" for="speed">
             <span>Speed</span>
             <strong id="speed-label">10 gen/s</strong>
           </label>
-          <input id="speed" type="range" min="1" max="40" value="10" />
+          <div class="stepper-row">
+            <button type="button" data-speed-step="-1" aria-label="Slow down">-</button>
+            <input id="speed" type="range" min="1" max="40" value="10" />
+            <button type="button" data-speed-step="1" aria-label="Speed up">+</button>
+          </div>
           <label class="range-row" for="zoom">
             <span>Zoom</span>
             <strong id="zoom-label">100%</strong>
           </label>
-          <input id="zoom" type="range" min="18" max="360" value="100" />
+          <div class="stepper-row">
+            <button type="button" data-zoom-step="-20" aria-label="Zoom out">-</button>
+            <input id="zoom" type="range" min="18" max="360" value="100" />
+            <button type="button" data-zoom-step="10" aria-label="Zoom in">+</button>
+          </div>
           <label class="toggle-row" for="age-colors">
             <span>Age colors</span>
             <input id="age-colors" type="checkbox" checked />
           </label>
         </section>
 
-        <section class="panel-section">
-          <h2>Population</h2>
+        <section class="panel-section graph-panel playground-panel">
+          <h2>Population Graph</h2>
           <canvas id="population-chart" width="300" height="92" aria-label="Population history chart"></canvas>
+          <p class="hint">Tracks live cell count over time so you can spot collapse, growth, and repeating rhythms.</p>
         </section>
 
-        <section class="panel-section">
-          <h2>RLE</h2>
-          <textarea id="rle-field" spellcheck="false" placeholder="Paste RLE here or export the current board"></textarea>
+        <section class="panel-section clipboard-panel playground-panel">
+          <h2>Import / Export RLE</h2>
+          <p class="hint">Paste RLE text from a Life pattern page, then Place it on the board. Export copies the current board as RLE text.</p>
+          <textarea id="rle-field" spellcheck="false" placeholder="Paste RLE text here, then choose Place RLE"></textarea>
           <div class="button-row">
-            <button id="import-rle" type="button">Import</button>
-            <button id="export-rle" type="button">Export</button>
+            <button id="import-rle" type="button">Place RLE</button>
+            <button id="export-rle" type="button">Export Board</button>
           </div>
         </section>
 
-        <section class="panel-section stats">
-          <h2>World</h2>
+        <section class="panel-section stats stats-panel playground-panel">
+          <h2>World Stats</h2>
           <dl>
             <div>
               <dt>Generation</dt>
@@ -145,17 +243,18 @@
           </dl>
         </section>
 
-        <section class="panel-section rules">
+        <section class="panel-section rules rules-panel playground-panel">
           <h2>Rules</h2>
           <p>Dead cells with exactly 3 live neighbors are born. Live cells survive with 2 or 3 neighbors; otherwise they fade out.</p>
         </section>
       </aside>
 
       <div class="hud" aria-live="polite">
-        <span id="active-note">Load a preset, draw a seed, or start with soup.</span>
+        <span id="active-note">Blank board ready. Draw cells, drag in a pattern, then press Play.</span>
       </div>
     </main>
 
+    <script id="life-runtime-config" type="application/json">{"backend":"local"}</script>
     <script type="module" src="/src/app.js"></script>
   </body>
 </html>

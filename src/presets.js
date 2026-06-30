@@ -1,3 +1,151 @@
+import { normalizeCoordinates } from './patterns.js';
+
+const GLIDER = [
+  [1, 0],
+  [2, 1],
+  [0, 2],
+  [1, 2],
+  [2, 2],
+];
+
+const LWSS = [
+  [1, 0],
+  [4, 0],
+  [0, 1],
+  [0, 2],
+  [4, 2],
+  [0, 3],
+  [1, 3],
+  [2, 3],
+  [3, 3],
+];
+
+const PULSAR = [
+  [2, 0],
+  [3, 0],
+  [4, 0],
+  [8, 0],
+  [9, 0],
+  [10, 0],
+  [0, 2],
+  [5, 2],
+  [7, 2],
+  [12, 2],
+  [0, 3],
+  [5, 3],
+  [7, 3],
+  [12, 3],
+  [0, 4],
+  [5, 4],
+  [7, 4],
+  [12, 4],
+  [2, 5],
+  [3, 5],
+  [4, 5],
+  [8, 5],
+  [9, 5],
+  [10, 5],
+  [2, 7],
+  [3, 7],
+  [4, 7],
+  [8, 7],
+  [9, 7],
+  [10, 7],
+  [0, 8],
+  [5, 8],
+  [7, 8],
+  [12, 8],
+  [0, 9],
+  [5, 9],
+  [7, 9],
+  [12, 9],
+  [0, 10],
+  [5, 10],
+  [7, 10],
+  [12, 10],
+  [2, 12],
+  [3, 12],
+  [4, 12],
+  [8, 12],
+  [9, 12],
+  [10, 12],
+];
+
+const GOSPER_GUN = [
+  [0, 4],
+  [0, 5],
+  [1, 4],
+  [1, 5],
+  [10, 4],
+  [10, 5],
+  [10, 6],
+  [11, 3],
+  [11, 7],
+  [12, 2],
+  [12, 8],
+  [13, 2],
+  [13, 8],
+  [14, 5],
+  [15, 3],
+  [15, 7],
+  [16, 4],
+  [16, 5],
+  [16, 6],
+  [17, 5],
+  [20, 2],
+  [20, 3],
+  [20, 4],
+  [21, 2],
+  [21, 3],
+  [21, 4],
+  [22, 1],
+  [22, 5],
+  [24, 0],
+  [24, 1],
+  [24, 5],
+  [24, 6],
+  [34, 2],
+  [34, 3],
+  [35, 2],
+  [35, 3],
+];
+
+const R_PENTOMINO = [
+  [1, 0],
+  [2, 0],
+  [0, 1],
+  [1, 1],
+  [1, 2],
+];
+
+const DIEHARD = [
+  [6, 0],
+  [0, 1],
+  [1, 1],
+  [1, 2],
+  [5, 2],
+  [6, 2],
+  [7, 2],
+];
+
+const ACORN = [
+  [1, 0],
+  [3, 1],
+  [0, 2],
+  [1, 2],
+  [4, 2],
+  [5, 2],
+  [6, 2],
+];
+
+function at(coordinates, offsetX, offsetY) {
+  return coordinates.map(([x, y]) => [x + offsetX, y + offsetY]);
+}
+
+function combine(parts) {
+  return normalizeCoordinates(parts.flat());
+}
+
 export const presets = [
   {
     id: 'block',
@@ -353,5 +501,105 @@ export const presets = [
       [5, 2],
       [6, 2],
     ],
+  },
+  {
+    id: 'gun-battery',
+    name: 'Glider gun battery',
+    note: 'Three Gosper guns staggered into a machine wall that throws streams across the board.',
+    coordinates: combine([
+      at(GOSPER_GUN, 0, 0),
+      at(GOSPER_GUN, 0, 24),
+      at(GOSPER_GUN, 0, 48),
+    ]),
+  },
+  {
+    id: 'spaceship-squadron',
+    name: 'Spaceship squadron',
+    note: 'A fleet of lightweight spaceships that makes motion obvious in the first few seconds.',
+    coordinates: combine([
+      at(LWSS, 0, 0),
+      at(LWSS, 0, 10),
+      at(LWSS, 0, 20),
+      at(LWSS, 18, 4),
+      at(LWSS, 18, 14),
+      at(LWSS, 18, 24),
+      at(LWSS, 36, 8),
+      at(LWSS, 36, 18),
+    ]),
+  },
+  {
+    id: 'pulsar-constellation',
+    name: 'Pulsar constellation',
+    note: 'A field of period-3 oscillators: symmetrical, readable, and instantly alive.',
+    coordinates: combine([
+      at(PULSAR, 0, 0),
+      at(PULSAR, 22, 0),
+      at(PULSAR, 44, 0),
+      at(PULSAR, 11, 20),
+      at(PULSAR, 33, 20),
+      at(PULSAR, 0, 40),
+      at(PULSAR, 22, 40),
+      at(PULSAR, 44, 40),
+    ]),
+  },
+  {
+    id: 'methuselah-garden',
+    name: 'Methuselah garden',
+    note: 'A spaced-out mix of famous long-lived seeds that keeps throwing off surprises.',
+    coordinates: combine([
+      at(R_PENTOMINO, 0, 0),
+      at(ACORN, 18, 8),
+      at(DIEHARD, 44, 2),
+      at(R_PENTOMINO, 68, 18),
+      at(ACORN, 84, 30),
+      at(DIEHARD, 118, 16),
+    ]),
+  },
+  {
+    id: 'glider-fleet',
+    name: 'Glider fleet',
+    note: 'Many small spaceships launched in formation so the wrapped world feels alive.',
+    coordinates: combine([
+      at(GLIDER, 0, 0),
+      at(GLIDER, 10, 7),
+      at(GLIDER, 20, 14),
+      at(GLIDER, 30, 21),
+      at(GLIDER, 40, 28),
+      at(GLIDER, 50, 35),
+      at(GLIDER, 60, 42),
+      at(GLIDER, 70, 49),
+      at(GLIDER, 80, 56),
+    ]),
+  },
+  {
+    id: 'blinker-wave',
+    name: 'Blinker wave',
+    note: 'Rows of phase-shifted blinkers that turn a tiny oscillator into a visible rhythm wall.',
+    coordinates: combine([
+      ...Array.from({ length: 12 }, (_, row) => (
+        Array.from({ length: 12 }, (_, column) => at([[0, 0], [1, 0], [2, 0]], column * 6 + (row % 2) * 3, row * 5))
+      )).flat(),
+    ]),
+  },
+];
+
+export const presetGroups = [
+  {
+    id: 'showcase',
+    title: 'Showcase',
+    note: 'Bigger starts that immediately show motion, growth, and machines.',
+    ids: ['gun-battery', 'spaceship-squadron', 'pulsar-constellation', 'methuselah-garden', 'glider-fleet', 'blinker-wave'],
+  },
+  {
+    id: 'motion',
+    title: 'Motion',
+    note: 'Patterns that pulse, move, fire, or unfold.',
+    ids: ['blinker', 'toad', 'beacon', 'pulsar', 'pentadecathlon', 'glider', 'lwss', 'gosper-gun', 'traffic-light', 'small-exploder', 'ten-cell-row', 'glider-pair', 'r-pentomino', 'diehard', 'acorn'],
+  },
+  {
+    id: 'basics',
+    title: 'Basics',
+    note: 'Small reference shapes for learning why some cells survive.',
+    ids: ['block', 'beehive', 'loaf', 'boat', 'tub'],
   },
 ];

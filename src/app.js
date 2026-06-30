@@ -14,13 +14,22 @@ import {
   describePeriodClaim,
   describePopulationSnapshot,
 } from './dev-tools.js';
+import { createCommunityRepository, migrateLocalState } from './community-repository.js';
+import { encodeShareLink, decodeShareLink } from './share.js';
 import {
   encodeRle,
   getPatternBounds,
+  getPresetGroup,
   parseRle,
 } from './patterns.js';
+import {
+  getLiveToolAction,
+  getNextTool,
+  shouldHideStampPreview,
+  getWheelZoomDelta,
+} from './interaction.js';
 import { mountLandingIntro } from './landing.js';
-import { presets } from './presets.js';
+import { presetGroups, presets } from './presets.js';
 
 const WORLD_WIDTH = 300;
 const WORLD_HEIGHT = 200;
@@ -46,6 +55,7 @@ const elements = {
   importRle: document.querySelector('#import-rle'),
   exportRle: document.querySelector('#export-rle'),
   rleField: document.querySelector('#rle-field'),
+  patternTabs: document.querySelector('#pattern-tabs'),
   presets: document.querySelector('#presets'),
   presetCount: document.querySelector('#preset-count'),
   generation: document.querySelector('#generation'),
@@ -57,12 +67,57 @@ const elements = {
   introLayer: document.querySelector('#intro-layer'),
   introCanvas: document.querySelector('#intro-canvas'),
   introPrompt: document.querySelector('#intro-prompt'),
+  introStart: document.querySelector('#intro-start'),
   modePlayground: document.querySelector('#mode-playground'),
   modeDev: document.querySelector('#mode-dev'),
+  modeCommunity: document.querySelector('#mode-community'),
   devPanel: document.querySelector('#dev-panel'),
   devOutput: document.querySelector('#dev-output'),
   devComponentButtons: document.querySelectorAll('[data-dev-component]'),
+  devDemoButtons: document.querySelectorAll('[data-dev-demo]'),
   devClaimButtons: document.querySelectorAll('[data-dev-claim]'),
+  communityPanel: document.querySelector('#community-panel'),
+  communityCount: document.querySelector('#community-count'),
+  profileName: document.querySelector('#profile-name'),
+  profileEmail: document.querySelector('#profile-email'),
+  saveProfile: document.querySelector('#save-profile'),
+  communityAuth: document.querySelector('#community-auth'),
+  communityCloudStatus: document.querySelector('#community-cloud-status'),
+  communityAuthEmail: document.querySelector('#community-auth-email'),
+  sendMagicLink: document.querySelector('#send-magic-link'),
+  communitySignOut: document.querySelector('#community-sign-out'),
+  communityAuthOutput: document.querySelector('#community-auth-output'),
+  creationTitle: document.querySelector('#creation-title'),
+  creationDescription: document.querySelector('#creation-description'),
+  creationTags: document.querySelector('#creation-tags'),
+  saveCreation: document.querySelector('#save-creation'),
+  publishCreation: document.querySelector('#publish-creation'),
+  copySharePayload: document.querySelector('#copy-share-payload'),
+  communityOutput: document.querySelector('#community-output'),
+  communityList: document.querySelector('#community-list'),
+  trendingList: document.querySelector('#trending-list'),
+  speedStepButtons: document.querySelectorAll('[data-speed-step]'),
+  zoomStepButtons: document.querySelectorAll('[data-zoom-step]'),
+};
+
+const localCommunity = createCommunityRepository({ backend: 'local' });
+let community = localCommunity;
+let communityState = community.getState();
+
+const communityRuntimeConfig = getCommunityRuntimeConfig();
+const communityAuth = {
+  cloudRequested: communityRuntimeConfig.backend === 'supabase',
+  cloudConfigured: isSupabaseCommunityConfigured(communityRuntimeConfig),
+  cloudRepo: null,
+  supabaseClient: null,
+  session: null,
+  user: null,
+  initializing: false,
+  sendingLink: false,
+  migrating: false,
+  migratedUserId: null,
+  message: '',
+  unsubscribe: null,
 };
 
 const state = {
@@ -79,6 +134,7 @@ const state = {
   panX: 0,
   panY: 0,
   tool: 'draw',
+  activePresetGroup: presetGroups[0].id,
   pointer: {
     active: false,
     mode: 'draw',
@@ -86,6 +142,7 @@ const state = {
     lastX: 0,
     lastY: 0,
   },
+  hoverCell: null,
   lastTick: 0,
   accumulator: 0,
 };
@@ -120,6 +177,413 @@ const devComponents = {
     coordinates: findPreset('glider-pair').coordinates,
   },
 };
+
+function getCommunityRuntimeConfig() {
+  const config = readInlineRuntimeConfig() || window.LIFE_LOGIC_COMMUNITY || {};
+  const supabase = config.supabase || {};
+
+  return {
+    backend: config.backend || supabase.backend || 'local',
+    supabaseUrl: config.supabaseUrl || config.url || config.SUPABASE_URL || supabase.url || supabase.supabaseUrl,
+    supabaseAnonKey:
+      config.supabaseAnonKey
+      || config.anonKey
+      || config.anon_key
+      || config.key
+      || config.SUPABASE_ANON_KEY
+      || supabase.anonKey
+      || supabase.anon_key
+      || supabase.key,
+    supabaseModuleUrl:
+      config.supabaseModuleUrl
+      || config.moduleUrl
+      || supabase.moduleUrl
+      || 'https://esm.sh/@supabase/supabase-js@2',
+    redirectTo: config.redirectTo || window.location.href.split('#')[0],
+  };
+}
+
+function readInlineRuntimeConfig() {
+  const script = document.querySelector('#life-runtime-config');
+  const text = script?.textContent?.trim();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function isSupabaseCommunityConfigured(config) {
+  return config.backend === 'supabase' && Boolean(config.supabaseUrl && config.supabaseAnonKey);
+}
+
+async function initializeCommunityBackend() {
+  renderCommunityAuth();
+
+  if (communityAuth.cloudRequested && !communityAuth.cloudConfigured) {
+    communityAuth.message = 'Cloud config missing URL or key.';
+    renderCommunityAuth();
+    return;
+  }
+
+  if (!communityAuth.cloudConfigured) return;
+
+  communityAuth.initializing = true;
+  communityAuth.message = 'Connecting to cloud...';
+  renderCommunityAuth();
+
+  try {
+    const client = await createSupabaseClientFromRuntime(communityRuntimeConfig);
+    const cloudRepo = createCommunityRepository({ backend: 'supabase', client });
+    communityAuth.supabaseClient = client;
+    communityAuth.cloudRepo = cloudRepo;
+    subscribeCommunityAuth(cloudRepo);
+
+    const session = await readCommunityAuthSession(cloudRepo);
+    if (session) {
+      await handleCommunityAuthSession(session, { reason: 'initial session' });
+    } else {
+      communityAuth.message = 'Sign in to publish, star, or clone.';
+      renderCommunityAuth();
+    }
+  } catch (error) {
+    community = localCommunity;
+    communityState = localCommunity.getState();
+    communityAuth.message = `Cloud unavailable: ${getErrorMessage(error)}`;
+    renderCommunity();
+  } finally {
+    communityAuth.initializing = false;
+    renderCommunityAuth();
+  }
+}
+
+async function createSupabaseClientFromRuntime(config) {
+  const { createClient } = await import(config.supabaseModuleUrl);
+
+  if (typeof createClient !== 'function') {
+    throw new Error('Supabase client module did not export createClient.');
+  }
+
+  return createClient(config.supabaseUrl, config.supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      persistSession: true,
+    },
+  });
+}
+
+function subscribeCommunityAuth(repo) {
+  if (typeof communityAuth.unsubscribe === 'function') {
+    communityAuth.unsubscribe();
+    communityAuth.unsubscribe = null;
+  }
+
+  const handleChange = (...args) => {
+    const session = normalizeAuthSession(getSessionFromAuthCallback(args));
+    handleCommunityAuthSession(session, { reason: 'auth change' }).catch((error) => {
+      communityAuth.message = `Auth update failed: ${getErrorMessage(error)}`;
+      renderCommunityAuth();
+    });
+  };
+
+  let subscription = null;
+  if (typeof repo.onAuthStateChange === 'function') {
+    subscription = repo.onAuthStateChange(handleChange);
+  } else if (communityAuth.supabaseClient?.auth?.onAuthStateChange) {
+    subscription = communityAuth.supabaseClient.auth.onAuthStateChange((event, session) => {
+      handleChange(event, session);
+    });
+  }
+
+  communityAuth.unsubscribe = getUnsubscribe(subscription);
+}
+
+function getSessionFromAuthCallback(args) {
+  const [eventOrSession, maybeSession] = args;
+
+  if (maybeSession === null || maybeSession?.user || maybeSession?.access_token) return maybeSession;
+  if (eventOrSession === null) return null;
+  if (eventOrSession?.session !== undefined) return eventOrSession.session;
+  if (eventOrSession?.user || eventOrSession?.access_token) return eventOrSession;
+
+  return null;
+}
+
+function getUnsubscribe(subscription) {
+  if (typeof subscription === 'function') return subscription;
+  if (typeof subscription?.unsubscribe === 'function') return () => subscription.unsubscribe();
+  if (typeof subscription?.data?.subscription?.unsubscribe === 'function') {
+    return () => subscription.data.subscription.unsubscribe();
+  }
+  return null;
+}
+
+async function readCommunityAuthSession(repo) {
+  if (typeof repo?.getAuthSession === 'function') {
+    return normalizeAuthSession(await repo.getAuthSession());
+  }
+
+  if (communityAuth.supabaseClient?.auth?.getSession) {
+    const { data, error } = await communityAuth.supabaseClient.auth.getSession();
+    if (error) throw new Error(error.message || 'Could not read auth session.');
+    return normalizeAuthSession(data?.session);
+  }
+
+  return null;
+}
+
+async function readCommunityAuthUser(repo, session) {
+  if (typeof repo?.getAuthUser === 'function') {
+    return normalizeAuthUser(await repo.getAuthUser());
+  }
+
+  if (session?.user) return session.user;
+
+  if (communityAuth.supabaseClient?.auth?.getUser) {
+    const { data, error } = await communityAuth.supabaseClient.auth.getUser();
+    if (error) throw new Error(error.message || 'Could not read auth user.');
+    return normalizeAuthUser(data?.user);
+  }
+
+  return null;
+}
+
+function normalizeAuthSession(value) {
+  if (!value) return null;
+  if (value.data?.session !== undefined) return value.data.session;
+  if (value.session !== undefined) return value.session;
+  return value;
+}
+
+function normalizeAuthUser(value) {
+  if (!value) return null;
+  if (value.data?.user !== undefined) return value.data.user;
+  if (value.user !== undefined) return value.user;
+  return value;
+}
+
+async function handleCommunityAuthSession(session, { reason = '' } = {}) {
+  const normalizedSession = normalizeAuthSession(session);
+
+  if (!normalizedSession?.user) {
+    communityAuth.session = null;
+    communityAuth.user = null;
+    communityAuth.migratedUserId = null;
+    community = localCommunity;
+    communityState = localCommunity.getState();
+    if (communityAuth.cloudConfigured && reason) {
+      communityAuth.message = 'Signed out. Local drafts active.';
+    }
+    renderCommunity();
+    return;
+  }
+
+  communityAuth.session = normalizedSession;
+  communityAuth.user = normalizedSession.user;
+  await activateCloudCommunity(normalizedSession);
+}
+
+async function activateCloudCommunity(session) {
+  const repo = communityAuth.cloudRepo;
+  if (!repo || communityAuth.migrating) return;
+
+  const user = await readCommunityAuthUser(repo, session);
+  communityAuth.user = user || session.user;
+
+  if (communityAuth.migratedUserId === communityAuth.user?.id && community === repo) {
+    renderCommunity();
+    return;
+  }
+
+  communityAuth.migrating = true;
+  communityAuth.message = hasLocalCommunityData()
+    ? 'Migrating local builds...'
+    : 'Syncing cloud profile...';
+  renderCommunityAuth();
+
+  try {
+    await saveCloudProfileFromLocal(repo, communityAuth.user);
+    const migration = await migrateLocalState(localCommunity, repo);
+    await repo.loadCommunityState();
+    community = repo;
+    communityState = community.getState();
+    communityAuth.migratedUserId = communityAuth.user?.id || null;
+    communityAuth.message = getMigrationMessage(migration);
+    renderCommunity();
+  } catch (error) {
+    community = localCommunity;
+    communityState = localCommunity.getState();
+    communityAuth.message = `Migration paused: ${getErrorMessage(error)}`;
+    elements.communityOutput.textContent = 'Cloud sign-in worked. Local data stayed local.';
+    renderCommunity();
+  } finally {
+    communityAuth.migrating = false;
+    renderCommunityAuth();
+  }
+}
+
+async function saveCloudProfileFromLocal(repo, user) {
+  const localState = localCommunity.getState();
+  const localProfile = localState.profile;
+  const email = localProfile?.email
+    || elements.profileEmail.value.trim()
+    || elements.communityAuthEmail.value.trim()
+    || user?.email
+    || '';
+  const displayName = localProfile?.displayName
+    || elements.profileName.value.trim()
+    || getDisplayNameFromEmail(email)
+    || 'Life Builder';
+
+  await repo.saveProfile({ email, displayName });
+}
+
+function getMigrationMessage(migration) {
+  const migratedCount = migration?.migratedCreations?.length || 0;
+
+  if (migratedCount > 0) {
+    return `Migrated ${migratedCount} local ${migratedCount === 1 ? 'build' : 'builds'}.`;
+  }
+
+  return 'Cloud profile ready.';
+}
+
+function hasLocalCommunityData() {
+  const localState = localCommunity.getState();
+  return Boolean(localState.profile || localState.creations.length > 0);
+}
+
+function getDisplayNameFromEmail(email) {
+  const [name] = String(email || '').split('@');
+  return name ? name.replace(/[._-]+/g, ' ') : '';
+}
+
+function isCloudSignedIn() {
+  return Boolean(communityAuth.session?.user || communityAuth.user);
+}
+
+function isCloudCommunityActive() {
+  return communityAuth.cloudConfigured && community === communityAuth.cloudRepo && isCloudSignedIn();
+}
+
+function requiresCloudSignInForSharedAction() {
+  return communityAuth.cloudConfigured && !isCloudSignedIn();
+}
+
+function showSignInRequired(action) {
+  const message = `Sign in to ${action} shared builds.`;
+  communityAuth.message = message;
+  elements.communityOutput.textContent = message;
+  renderCommunityAuth();
+}
+
+async function sendCommunityMagicLink() {
+  if (!communityAuth.cloudConfigured || !communityAuth.cloudRepo) {
+    communityAuth.message = 'Cloud is not ready.';
+    renderCommunityAuth();
+    return;
+  }
+
+  const email = (elements.communityAuthEmail.value || elements.profileEmail.value).trim();
+  if (!email) {
+    communityAuth.message = 'Enter an email for the magic link.';
+    renderCommunityAuth();
+    return;
+  }
+
+  communityAuth.sendingLink = true;
+  communityAuth.message = 'Sending magic link...';
+  renderCommunityAuth();
+
+  try {
+    await sendMagicLinkWithRepository(communityAuth.cloudRepo, email, {
+      redirectTo: communityRuntimeConfig.redirectTo,
+    });
+    communityAuth.message = 'Magic link sent. Check your email.';
+  } catch (error) {
+    communityAuth.message = `Could not send link: ${getErrorMessage(error)}`;
+  } finally {
+    communityAuth.sendingLink = false;
+    renderCommunityAuth();
+  }
+}
+
+async function sendMagicLinkWithRepository(repo, email, options) {
+  if (typeof repo?.sendMagicLink === 'function') {
+    return repo.sendMagicLink(email, options);
+  }
+
+  if (communityAuth.supabaseClient?.auth?.signInWithOtp) {
+    const { error } = await communityAuth.supabaseClient.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: options.redirectTo },
+    });
+    if (error) throw new Error(error.message || 'Could not send magic link.');
+    return null;
+  }
+
+  throw new Error('Magic-link auth is not available.');
+}
+
+async function signOutCommunity() {
+  if (!communityAuth.cloudConfigured) return;
+
+  try {
+    if (typeof communityAuth.cloudRepo?.signOut === 'function') {
+      await communityAuth.cloudRepo.signOut();
+    } else if (communityAuth.supabaseClient?.auth?.signOut) {
+      const { error } = await communityAuth.supabaseClient.auth.signOut();
+      if (error) throw new Error(error.message || 'Could not sign out.');
+    }
+    communityAuth.message = 'Signed out. Local drafts active.';
+  } catch (error) {
+    communityAuth.message = `Could not sign out: ${getErrorMessage(error)}`;
+  } finally {
+    communityAuth.session = null;
+    communityAuth.user = null;
+    communityAuth.migratedUserId = null;
+    community = localCommunity;
+    communityState = localCommunity.getState();
+    renderCommunity();
+  }
+}
+
+function renderCommunityAuth() {
+  if (!elements.communityAuth) return;
+
+  const visible = communityAuth.cloudConfigured || communityAuth.cloudRequested;
+  elements.communityAuth.hidden = !visible;
+  if (!visible) return;
+
+  const signedIn = isCloudSignedIn();
+  const userEmail = communityAuth.user?.email || communityAuth.session?.user?.email || '';
+
+  elements.communityCloudStatus.textContent = getCloudStatusText({ signedIn, userEmail });
+  elements.communitySignOut.hidden = !signedIn;
+  elements.communitySignOut.disabled = communityAuth.migrating;
+  elements.sendMagicLink.disabled = !communityAuth.cloudRepo || communityAuth.sendingLink || communityAuth.migrating || signedIn;
+  elements.communityAuthEmail.disabled = signedIn || communityAuth.sendingLink || communityAuth.migrating;
+  elements.communityAuthOutput.textContent = communityAuth.message || (signedIn ? 'Cloud active.' : 'Local drafts active.');
+
+  if (!elements.communityAuthEmail.value && document.activeElement !== elements.communityAuthEmail) {
+    elements.communityAuthEmail.value = elements.profileEmail.value || userEmail;
+  }
+}
+
+function getCloudStatusText({ signedIn, userEmail }) {
+  if (communityAuth.cloudRequested && !communityAuth.cloudConfigured) return 'Cloud: missing config';
+  if (communityAuth.initializing) return 'Cloud: connecting';
+  if (communityAuth.migrating) return 'Cloud: migrating';
+  if (signedIn) return `Cloud: ${userEmail || 'signed in'}`;
+  return 'Cloud: signed out';
+}
+
+function getErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error || 'Unknown error');
+}
 
 function resizeCanvas() {
   const pixelRatio = window.devicePixelRatio || 1;
@@ -164,6 +628,12 @@ function setZoom(nextZoom, anchorX = window.innerWidth / 2, anchorY = window.inn
   elements.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
 }
 
+function setSpeed(nextSpeed) {
+  state.speed = Math.min(40, Math.max(1, nextSpeed));
+  elements.speed.value = state.speed;
+  elements.speedLabel.textContent = `${state.speed} gen/s`;
+}
+
 function paintCell(cellX, cellY, alive) {
   const x = wrap(cellX, state.board.width);
   const y = wrap(cellY, state.board.height);
@@ -194,6 +664,11 @@ function applyToolAt(clientX, clientY) {
   state.pointer.lastCell = key;
 }
 
+function getCellAliveAt(clientX, clientY) {
+  const cell = screenToCell(clientX, clientY);
+  return getCell(state.board, cell.x, cell.y);
+}
+
 function stampPattern(cellX, cellY) {
   if (!state.selectedPreset) {
     elements.activeNote.textContent = 'Choose a preset first, then stamp it anywhere on the world.';
@@ -208,6 +683,13 @@ function stampPattern(cellX, cellY) {
   markLivingCells(255, 1);
   elements.activeNote.textContent = `Stamped ${state.selectedPreset.name}.`;
   updateStats();
+}
+
+function selectPreset(preset) {
+  state.selectedPreset = preset;
+  setTool('stamp');
+  updatePresetSelection();
+  elements.activeNote.textContent = `Placing ${preset.name}. Click the board to paste it; click Place again to turn it off.`;
 }
 
 function stepSimulation() {
@@ -259,22 +741,23 @@ function randomSoup() {
 function clearWorld() {
   state.board = clearBoard(state.board);
   resetCellEffects();
-  elements.activeNote.textContent = 'The world is empty. Draw a seed or load a preset.';
+  elements.activeNote.textContent = 'Blank board ready. Draw cells, drag in a pattern, then press Play.';
   updateStats();
 }
 
 function importRle() {
   try {
     const pattern = parseRle(elements.rleField.value);
-    const nextBoard = clearBoard(state.board);
-    const originX = Math.floor(state.board.width / 2 - pattern.width / 2);
-    const originY = Math.floor(state.board.height / 2 - pattern.height / 2);
 
-    state.board = placePattern(nextBoard, pattern.coordinates, originX, originY);
-    resetCellEffects();
-    markLivingCells(255, 1);
-    elements.activeNote.textContent = `Imported RLE pattern (${pattern.width} x ${pattern.height}).`;
-    updateStats();
+    state.selectedPreset = {
+      id: 'rle-clipboard',
+      name: 'RLE clipboard',
+      note: `RLE loaded (${pattern.width} x ${pattern.height}). Click the board to paste it; click Place again to turn it off.`,
+      coordinates: pattern.coordinates,
+    };
+    setTool('stamp');
+    updatePresetSelection();
+    elements.activeNote.textContent = state.selectedPreset.note;
   } catch (error) {
     elements.activeNote.textContent = error instanceof Error ? error.message : 'Could not import that RLE pattern.';
   }
@@ -339,6 +822,7 @@ function render() {
 
   drawGrid(cellSize, worldWidth, worldHeight);
   drawCells(cellSize);
+  drawStampPreview(cellSize);
 
   ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
   ctx.lineWidth = 1;
@@ -412,6 +896,35 @@ function drawCells(cellSize) {
   }
 
   ctx.shadowBlur = 0;
+}
+
+function drawStampPreview(cellSize) {
+  if (state.tool !== 'stamp' || !state.selectedPreset || !state.hoverCell) return;
+
+  const bounds = getPatternBounds(state.selectedPreset.coordinates);
+  const originX = state.hoverCell.x - Math.floor(bounds.width / 2);
+  const originY = state.hoverCell.y - Math.floor(bounds.height / 2);
+  const inset = cellSize > 8 ? 1 : 0;
+
+  ctx.save();
+  ctx.shadowColor = 'rgba(94, 234, 212, 0.52)';
+  ctx.shadowBlur = Math.min(18, cellSize);
+  ctx.fillStyle = 'rgba(191, 253, 244, 0.28)';
+  ctx.strokeStyle = 'rgba(94, 234, 212, 0.72)';
+  ctx.lineWidth = Math.max(1, Math.min(2, cellSize * 0.12));
+
+  for (const [patternX, patternY] of state.selectedPreset.coordinates) {
+    const x = wrap(originX + patternX, state.board.width);
+    const y = wrap(originY + patternY, state.board.height);
+    const px = x * cellSize + inset;
+    const py = y * cellSize + inset;
+    const size = Math.max(1, cellSize - inset * 2);
+
+    ctx.fillRect(px, py, size, size);
+    if (cellSize > 6) ctx.strokeRect(px + 0.5, py + 0.5, size - 1, size - 1);
+  }
+
+  ctx.restore();
 }
 
 function getAliveColor(age, trail) {
@@ -537,21 +1050,65 @@ function setTool(tool) {
     const active = button.dataset.tool === tool;
     button.classList.toggle('active', active);
     button.setAttribute('aria-checked', String(active));
+
+    if (button.dataset.tool === 'stamp') {
+      button.textContent = active ? 'Placing' : 'Place';
+      button.setAttribute(
+        'aria-label',
+        active ? 'Place mode on. Click again to turn it off.' : 'Place selected pattern',
+      );
+      button.title = active ? 'Place mode is on. Click again to turn it off.' : 'Place selected pattern';
+    }
+  }
+}
+
+function chooseTool(requestedTool) {
+  const wasHidingStamp = shouldHideStampPreview({
+    currentTool: state.tool,
+    requestedTool,
+  });
+  const nextTool = getNextTool({
+    currentTool: state.tool,
+    requestedTool,
+  });
+
+  setTool(nextTool);
+
+  if (wasHidingStamp) {
+    state.hoverCell = null;
+    state.pointer.active = false;
+    elements.activeNote.textContent = state.selectedPreset
+      ? `Place mode off. ${state.selectedPreset.name} stays selected; click Place to stamp it again.`
+      : 'Place mode off.';
+    return;
+  }
+
+  if (nextTool === 'stamp') {
+    elements.activeNote.textContent = state.selectedPreset
+      ? `Placing ${state.selectedPreset.name}. Click the board to paste it; click Place again to turn it off.`
+      : 'Choose a preset first, then use Place to stamp it on the board.';
   }
 }
 
 function setMode(mode) {
   state.mode = mode;
   const devMode = mode === 'dev';
+  const communityMode = mode === 'community';
 
   document.querySelector('.app-shell').classList.toggle('dev-mode', devMode);
-  elements.modePlayground.classList.toggle('active', !devMode);
+  document.querySelector('.app-shell').classList.toggle('community-mode', communityMode);
+  elements.modePlayground.classList.toggle('active', !devMode && !communityMode);
   elements.modeDev.classList.toggle('active', devMode);
-  elements.modePlayground.setAttribute('aria-checked', String(!devMode));
+  elements.modeCommunity.classList.toggle('active', communityMode);
+  elements.modePlayground.setAttribute('aria-checked', String(!devMode && !communityMode));
   elements.modeDev.setAttribute('aria-checked', String(devMode));
+  elements.modeCommunity.setAttribute('aria-checked', String(communityMode));
 
   if (devMode) {
     elements.activeNote.textContent = 'Dev Mode: stamp components, run checks, and treat gliders as signals.';
+  } else if (communityMode) {
+    renderCommunity();
+    elements.activeNote.textContent = 'Community Mode: save this board, publish it, clone builds, and watch what trends.';
   } else {
     elements.activeNote.textContent = 'Playground Mode: explore, draw, stamp presets, and watch the world evolve.';
   }
@@ -570,8 +1127,23 @@ function selectDevComponent(componentId) {
   };
   setTool('stamp');
   updatePresetSelection();
-  elements.devOutput.textContent = `${component.name} ready. Click the world to stamp it.`;
+  elements.devOutput.textContent = `${component.name} ready. Click the world to stamp it; click Place again to turn stamping off.`;
   elements.activeNote.textContent = component.note;
+}
+
+function runDevDemo(demo) {
+  const demoMessages = {
+    and: 'AND demo: use two signal lanes and check the output only when both arrive. First build block: stamp two Signals, then a Collide target.',
+    or: 'OR demo: either input lane may produce output. First build block: stamp two Signals aimed toward one output lane.',
+    xor: 'XOR demo: one input gives output; two inputs cancel or redirect. Use Collision Pair as the starter seed.',
+    adder: 'Adder plan: half-adder needs XOR for sum and AND for carry. Build XOR and AND demos first, then wire their outputs.',
+  };
+
+  if (demo === 'and' || demo === 'or') selectDevComponent('glider');
+  if (demo === 'xor') selectDevComponent('collision-pair');
+  if (demo === 'adder') selectDevComponent('gosper-gun');
+
+  elements.devOutput.textContent = demoMessages[demo] || 'Choose a logic demo.';
 }
 
 function runDevClaim(claim) {
@@ -588,11 +1160,325 @@ function runDevClaim(claim) {
   }
 }
 
+async function saveLocalProfile() {
+  const email = elements.profileEmail.value;
+  const displayName = elements.profileName.value;
+
+  if (!email.trim() || !displayName.trim()) {
+    elements.communityOutput.textContent = 'Add a display name and email before saving the profile.';
+    return;
+  }
+
+  try {
+    const profile = await community.saveProfile({ email, displayName });
+    syncCommunity();
+    elements.communityOutput.textContent = isCloudCommunityActive()
+      ? `Cloud profile saved for ${profile.displayName}.`
+      : `Signed in locally as ${profile.displayName}.`;
+  } catch (error) {
+    elements.communityOutput.textContent = `Could not save profile: ${getErrorMessage(error)}`;
+  }
+}
+
+async function saveCurrentCreation({ publish = false } = {}) {
+  if (publish && requiresCloudSignInForSharedAction()) {
+    showSignInRequired('publish');
+    return null;
+  }
+
+  if (!communityState.profile) {
+    elements.communityOutput.textContent = isCloudCommunityActive()
+      ? 'Cloud profile is still syncing. Try again in a moment.'
+      : 'Create a local account before saving this board.';
+    return null;
+  }
+
+  const coordinates = getLiveCoordinates();
+  let creation;
+  try {
+    creation = await community.saveCreation({
+      title: elements.creationTitle.value || getSuggestedCreationTitle(),
+      description: elements.creationDescription.value,
+      tags: elements.creationTags.value,
+      rle: encodeRle(coordinates),
+      width: state.board.width,
+      height: state.board.height,
+      generation: state.board.generation,
+      population: coordinates.length,
+      thumbnail: captureBoardThumbnail(),
+    }, { publish });
+  } catch (error) {
+    elements.communityOutput.textContent = error.name === 'QuotaExceededError'
+      ? 'Could not save: browser storage is full. Remove some builds and try again.'
+      : `Could not save: ${getErrorMessage(error)}`;
+    return null;
+  }
+
+  syncCommunity();
+  elements.communityOutput.textContent = publish
+    ? `Published ${creation.title}. It now appears in Trending.`
+    : `Saved ${creation.title} as a private draft.`;
+
+  return creation;
+}
+
+async function publishActiveCreation() {
+  await saveCurrentCreation({ publish: true });
+}
+
+async function copySharePayload() {
+  const active = getActiveCreation() || await saveCurrentCreation();
+
+  if (!active) return;
+
+  const link = encodeShareLink(active, { origin: window.location.origin + window.location.pathname });
+
+  try {
+    await navigator.clipboard.writeText(link);
+    elements.communityOutput.textContent = `Copied a share link for ${active.title}.`;
+  } catch {
+    elements.rleField.value = link;
+    elements.communityOutput.textContent = 'Clipboard was unavailable, so the share link was placed in the RLE box.';
+  }
+}
+
+function importSharedBuildFromHash() {
+  const shared = decodeShareLink(window.location.hash);
+  if (!shared) return;
+
+  try {
+    const pattern = parseRle(shared.rle);
+    state.board = clearBoard(state.board);
+    state.board = placePattern(state.board, pattern.coordinates, 0, 0);
+    resetCellEffects();
+    markLivingCells(230, 1);
+    updateStats();
+    elements.creationTitle.value = shared.title || '';
+    elements.creationDescription.value = shared.description || '';
+    elements.creationTags.value = (shared.tags || []).join(', ');
+    setMode('community');
+    elements.communityOutput.textContent = shared.ownerName
+      ? `Loaded a shared build from ${shared.ownerName}. Save it to add it to your library.`
+      : 'Loaded a shared build. Save it to add it to your library.';
+  } catch {
+    elements.communityOutput.textContent = 'That share link could not be opened. Its build payload needs repair.';
+  }
+}
+
+function loadCommunityCreation(creationId) {
+  const creation = community.findCreation(creationId);
+
+  if (!creation) return;
+
+  try {
+    const pattern = parseRle(creation.currentVersion.rle);
+    state.board = clearBoard(state.board);
+    state.board = placePattern(state.board, pattern.coordinates, 0, 0);
+    state.board.generation = creation.currentVersion.generation;
+    resetCellEffects();
+    markLivingCells(230, 1);
+    updateStats();
+    community.setActiveCreation(creation.id);
+    syncCommunity();
+    elements.communityOutput.textContent = `Opened ${creation.title} on the board.`;
+  } catch {
+    elements.communityOutput.textContent = `Could not open ${creation.title}. Its RLE payload needs repair.`;
+  }
+}
+
+async function starCommunityCreation(creationId) {
+  if (requiresCloudSignInForSharedAction()) {
+    showSignInRequired('star');
+    return;
+  }
+
+  if (!communityState.profile) {
+    elements.communityOutput.textContent = 'Create an account before starring builds.';
+    return;
+  }
+
+  let nextCreation;
+  try {
+    nextCreation = await community.toggleStar(creationId, communityState.profile.id);
+    if (!nextCreation) return;
+  } catch (error) {
+    elements.communityOutput.textContent = `Could not update star: ${getErrorMessage(error)}`;
+    return;
+  }
+
+  syncCommunity();
+  elements.communityOutput.textContent = nextCreation.starredBy.includes(communityState.profile.id)
+    ? `Starred ${nextCreation.title}.`
+    : `Removed star from ${nextCreation.title}.`;
+}
+
+async function cloneCommunityCreation(creationId) {
+  if (requiresCloudSignInForSharedAction()) {
+    showSignInRequired('clone');
+    return;
+  }
+
+  if (!communityState.profile) {
+    elements.communityOutput.textContent = 'Create an account before cloning builds.';
+    return;
+  }
+
+  let remix;
+  try {
+    remix = await community.cloneCreation(creationId, communityState.profile);
+    if (!remix) return;
+  } catch (error) {
+    elements.communityOutput.textContent = `Could not clone build: ${getErrorMessage(error)}`;
+    return;
+  }
+
+  const source = community.findCreation(remix.remixedFromId);
+  syncCommunity();
+  elements.communityOutput.textContent = `Cloned ${source?.title ?? 'build'}. The remix is private until you publish it.`;
+}
+
+async function renderCommunity() {
+  renderCommunityAuth();
+
+  if (communityState.profile) {
+    elements.profileName.value = communityState.profile.displayName;
+    elements.profileEmail.value = communityState.profile.email;
+    elements.saveProfile.textContent = isCloudCommunityActive() ? 'Update Profile' : 'Update Account';
+  } else {
+    elements.saveProfile.textContent = isCloudCommunityActive() ? 'Create Profile' : 'Create Account';
+  }
+
+  elements.communityCount.textContent = `${communityState.creations.length} builds`;
+  elements.communityList.innerHTML = '';
+  elements.trendingList.innerHTML = '';
+
+  const ownCreations = communityState.profile
+    ? communityState.creations.filter((creation) => creation.ownerId === communityState.profile.id)
+    : communityState.creations;
+  renderCommunityList(elements.communityList, ownCreations, 'No saved builds yet.');
+
+  const trending = await community.listTrendingCreations();
+  renderCommunityList(elements.trendingList, trending, 'Publish a build to start the trending list.');
+}
+
+function renderCommunityList(container, creations, emptyText) {
+  if (creations.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'community-empty';
+    empty.textContent = emptyText;
+    container.append(empty);
+    return;
+  }
+
+  for (const creation of creations) {
+    const card = document.createElement('article');
+    card.className = 'community-card';
+    const starred = communityState.profile && creation.starredBy?.includes(communityState.profile.id);
+    card.innerHTML = `
+      <div>
+        <strong>${escapeHtml(creation.title)}</strong>
+        <span>${creation.visibility === 'public' ? 'Published' : 'Draft'} by ${escapeHtml(creation.ownerName)}</span>
+      </div>
+      <p>${escapeHtml(creation.description || 'No description yet.')}</p>
+      <div class="community-tags">${creation.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
+      <div class="community-stats">
+        <span>${creation.starCount} stars</span>
+        <span>${creation.cloneCount} clones</span>
+        <span>${creation.currentVersion.population} cells</span>
+      </div>
+      <div class="community-actions">
+        <button type="button" data-community-action="open" data-creation-id="${creation.id}">Open</button>
+        <button type="button" data-community-action="star" data-creation-id="${creation.id}">${starred ? 'Unstar' : 'Star'}</button>
+        <button type="button" data-community-action="clone" data-creation-id="${creation.id}">Clone</button>
+      </div>
+    `;
+    container.append(card);
+  }
+}
+
+function handleCommunityAction(event) {
+  const button = event.target.closest('[data-community-action]');
+  if (!button) return;
+
+  const { communityAction, creationId } = button.dataset;
+
+  if (communityAction === 'open') loadCommunityCreation(creationId);
+  if (communityAction === 'star') starCommunityCreation(creationId);
+  if (communityAction === 'clone') cloneCommunityCreation(creationId);
+}
+
+function getActiveCreation() {
+  return community.findCreation(communityState.activeCreationId);
+}
+
+function syncCommunity() {
+  communityState = community.getState();
+  renderCommunity();
+}
+
+function getSuggestedCreationTitle() {
+  return `Life build ${communityState.creations.length + 1}`;
+}
+
+function captureBoardThumbnail() {
+  try {
+    return canvas.toDataURL('image/png');
+  } catch {
+    return '';
+  }
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function renderPresets() {
   elements.presetCount.textContent = `${presets.length}`;
+  elements.patternTabs.innerHTML = '';
   elements.presets.innerHTML = '';
 
-  for (const preset of presets) {
+  const activeGroup = getPresetGroup(presetGroups, state.activePresetGroup) ?? presetGroups[0];
+  state.activePresetGroup = activeGroup.id;
+
+  for (const group of presetGroups) {
+    const tab = document.createElement('button');
+    const active = group.id === activeGroup.id;
+    tab.type = 'button';
+    tab.className = 'pattern-tab';
+    tab.dataset.patternTab = group.id;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', String(active));
+    tab.classList.toggle('active', active);
+    tab.innerHTML = `
+      <span>${group.title}</span>
+      <small>${group.ids.length}</small>
+    `;
+    tab.addEventListener('click', () => {
+      state.activePresetGroup = group.id;
+      renderPresets();
+      updatePresetSelection();
+    });
+    elements.patternTabs.append(tab);
+  }
+
+  const groupElement = document.createElement('section');
+  groupElement.className = 'preset-group';
+  groupElement.setAttribute('role', 'tabpanel');
+  groupElement.innerHTML = `
+    <div class="preset-group-heading">
+      <strong>${activeGroup.title}</strong>
+      <span>${activeGroup.note}</span>
+    </div>
+  `;
+
+  for (const id of activeGroup.ids) {
+    const preset = presets.find((candidate) => candidate.id === id);
+    if (!preset) continue;
+
     const button = document.createElement('button');
     button.className = 'preset';
     button.type = 'button';
@@ -601,9 +1487,18 @@ function renderPresets() {
       <span class="preset-name">${preset.name}</span>
       <span class="preset-note">${preset.note}</span>
     `;
-    button.addEventListener('click', () => loadPreset(preset));
-    elements.presets.append(button);
+    button.draggable = true;
+    button.addEventListener('click', () => selectPreset(preset));
+    button.addEventListener('dragstart', (event) => {
+      selectPreset(preset);
+      event.dataTransfer.effectAllowed = 'copy';
+      event.dataTransfer.setData('text/life-preset-id', preset.id);
+      event.dataTransfer.setData('text/plain', preset.name);
+    });
+    groupElement.append(button);
   }
+
+  elements.presets.append(groupElement);
 }
 
 function updatePresetSelection() {
@@ -621,24 +1516,20 @@ function bindEvents() {
   canvas.addEventListener('pointerdown', (event) => {
     canvas.setPointerCapture(event.pointerId);
     state.pointer.active = true;
-    state.pointer.mode = event.button === 1 || event.altKey ? 'pan' : state.tool;
+    state.pointer.mode = state.tool === 'draw'
+      ? getLiveToolAction({ playing: state.playing, alive: getCellAliveAt(event.clientX, event.clientY) })
+      : state.tool;
     state.pointer.lastCell = null;
     state.pointer.lastX = event.clientX;
     state.pointer.lastY = event.clientY;
 
-    if (state.pointer.mode !== 'pan') applyToolAt(event.clientX, event.clientY);
+    applyToolAt(event.clientX, event.clientY);
   });
 
   canvas.addEventListener('pointermove', (event) => {
-    if (!state.pointer.active) return;
+    state.hoverCell = screenToCell(event.clientX, event.clientY);
 
-    if (state.pointer.mode === 'pan') {
-      state.panX += event.clientX - state.pointer.lastX;
-      state.panY += event.clientY - state.pointer.lastY;
-      state.pointer.lastX = event.clientX;
-      state.pointer.lastY = event.clientY;
-      return;
-    }
+    if (!state.pointer.active) return;
 
     applyToolAt(event.clientX, event.clientY);
   });
@@ -649,18 +1540,32 @@ function bindEvents() {
     state.pointer.lastCell = null;
   });
 
+  canvas.addEventListener('pointerleave', () => {
+    state.hoverCell = null;
+  });
+
   canvas.addEventListener('wheel', (event) => {
     event.preventDefault();
-
-    if (event.ctrlKey || event.metaKey) {
-      const factor = Math.exp(-event.deltaY * 0.002);
-      setZoom(state.zoom * factor, event.clientX, event.clientY);
-      return;
-    }
-
-    state.panX -= event.deltaX;
-    state.panY -= event.deltaY;
+    setZoom(state.zoom * getWheelZoomDelta(event), event.clientX, event.clientY);
   }, { passive: false });
+
+  canvas.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  });
+
+  canvas.addEventListener('drop', (event) => {
+    event.preventDefault();
+    const presetId = event.dataTransfer.getData('text/life-preset-id');
+    const preset = presets.find((candidate) => candidate.id === presetId);
+
+    if (!preset) return;
+
+    state.selectedPreset = preset;
+    const cell = screenToCell(event.clientX, event.clientY);
+    stampPattern(cell.x, cell.y);
+    updatePresetSelection();
+  });
 
   elements.playToggle.addEventListener('click', () => {
     state.playing = !state.playing;
@@ -680,8 +1585,7 @@ function bindEvents() {
   });
 
   elements.speed.addEventListener('input', () => {
-    state.speed = Number(elements.speed.value);
-    elements.speedLabel.textContent = `${state.speed} gen/s`;
+    setSpeed(Number(elements.speed.value));
   });
 
   elements.zoom.addEventListener('input', () => {
@@ -696,8 +1600,43 @@ function bindEvents() {
 
   elements.modeDev.addEventListener('click', () => setMode('dev'));
 
+  elements.modeCommunity.addEventListener('click', () => setMode('community'));
+
+  elements.saveProfile.addEventListener('click', () => saveLocalProfile());
+
+  elements.sendMagicLink.addEventListener('click', () => {
+    sendCommunityMagicLink();
+  });
+
+  elements.communitySignOut.addEventListener('click', () => {
+    signOutCommunity();
+  });
+
+  elements.saveCreation.addEventListener('click', () => saveCurrentCreation());
+
+  elements.publishCreation.addEventListener('click', () => publishActiveCreation());
+
+  elements.copySharePayload.addEventListener('click', () => {
+    copySharePayload();
+  });
+
+  elements.communityList.addEventListener('click', handleCommunityAction);
+  elements.trendingList.addEventListener('click', handleCommunityAction);
+
+  for (const button of elements.speedStepButtons) {
+    button.addEventListener('click', () => setSpeed(state.speed + Number(button.dataset.speedStep)));
+  }
+
+  for (const button of elements.zoomStepButtons) {
+    button.addEventListener('click', () => setZoom((Number(elements.zoom.value) + Number(button.dataset.zoomStep)) / 100));
+  }
+
   for (const button of elements.devComponentButtons) {
     button.addEventListener('click', () => selectDevComponent(button.dataset.devComponent));
+  }
+
+  for (const button of elements.devDemoButtons) {
+    button.addEventListener('click', () => runDevDemo(button.dataset.devDemo));
   }
 
   for (const button of elements.devClaimButtons) {
@@ -713,7 +1652,7 @@ function bindEvents() {
   });
 
   for (const button of elements.toolButtons) {
-    button.addEventListener('click', () => setTool(button.dataset.tool));
+    button.addEventListener('click', () => chooseTool(button.dataset.tool));
   }
 
   window.addEventListener('keydown', (event) => {
@@ -725,10 +1664,9 @@ function bindEvents() {
       updatePlayButton();
     }
     if (event.key === '.') stepSimulation();
-    if (event.key === '1') setTool('draw');
-    if (event.key === '2') setTool('erase');
-    if (event.key === '3') setTool('stamp');
-    if (event.key === '4') setTool('pan');
+    if (event.key === '1') chooseTool('draw');
+    if (event.key === '2') chooseTool('erase');
+    if (event.key === '3') chooseTool('stamp');
   });
 }
 
@@ -759,15 +1697,19 @@ function boot() {
   resizeCanvas();
   centerWorld();
   renderPresets();
+  renderCommunity();
   updateStats();
   updatePlayButton();
   setMode('playground');
   bindEvents();
-  randomSoup();
+  clearWorld();
+  importSharedBuildFromHash();
+  initializeCommunityBackend();
   mountLandingIntro({
     layer: elements.introLayer,
     canvas: elements.introCanvas,
     prompt: elements.introPrompt,
+    startButton: elements.introStart,
   });
   requestAnimationFrame(loop);
 }

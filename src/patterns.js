@@ -33,6 +33,10 @@ export function normalizeCoordinates(coordinates) {
     .sort(([ax, ay], [bx, by]) => ay - by || ax - bx);
 }
 
+export function getPresetGroup(groups, groupId) {
+  return groups.find((group) => group.id === groupId) ?? null;
+}
+
 export function parseRle(input) {
   const lines = input
     .split(/\r?\n/)

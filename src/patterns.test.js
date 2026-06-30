@@ -3,9 +3,14 @@ import assert from 'node:assert/strict';
 import {
   encodeRle,
   getPatternBounds,
+  getPresetGroup,
   normalizeCoordinates,
   parseRle,
 } from './patterns.js';
+import {
+  presetGroups,
+  presets,
+} from './presets.js';
 
 test('calculates pattern bounds from sparse coordinates', () => {
   assert.deepEqual(getPatternBounds([[3, 2], [5, 6], [4, 4]]), {
@@ -50,4 +55,20 @@ test('encodes coordinates as compact RLE', () => {
     [1, 2],
     [2, 2],
   ]), 'x = 3, y = 3, rule = B3/S23\nbo$2bo$3o!');
+});
+
+test('preset groups cover each preset once for library tabs', () => {
+  const groupedIds = presetGroups.flatMap((group) => group.ids);
+
+  assert.equal(groupedIds.length, presets.length);
+  assert.equal(new Set(groupedIds).size, presets.length);
+  assert.deepEqual(
+    groupedIds.toSorted(),
+    presets.map((preset) => preset.id).toSorted(),
+  );
+});
+
+test('finds a preset group by tab id', () => {
+  assert.equal(getPresetGroup(presetGroups, 'motion')?.title, 'Motion');
+  assert.equal(getPresetGroup(presetGroups, 'missing'), null);
 });
