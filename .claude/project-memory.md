@@ -22,6 +22,6 @@ Avoid adding these by default:
 Immediate priorities:
 
 1. Keep the Life engine framework-agnostic.
-2. Stabilize Supabase migration history and real backend contract testing.
+2. Keep Supabase migration history, advisors, and real backend contract testing green before future schema changes.
 3. Add TypeScript incrementally.
 4. Move to Next.js/React later, when public SSR routes justify it.

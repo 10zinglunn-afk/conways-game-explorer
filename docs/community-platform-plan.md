@@ -10,7 +10,7 @@
 | Shared contract test suite | Done (`src/community-repository.contract.js`) |
 | URL share links + import-on-load | Done |
 | Supabase project | Done: `conway-life-community` (`wfkzhsdjzgnmurkgsjvd`, `us-east-1`) |
-| Supabase schema / RLS / functions | Done on the linked project: migration history is repaired, all local migrations through `20260630145548_atomic_save_creation_rpc.sql` are recorded remotely, and `save_creation` is deployed with the intended authenticated/service-role grant surface. |
+| Supabase schema / RLS / functions | Done on the linked project: migration history is repaired, all local migrations through `20260630214126_harden_rpc_security_definer_exposure.sql` are recorded remotely, public RPCs no longer run as `SECURITY DEFINER`, and `save_creation` is deployed with the intended authenticated/service-role grant surface. |
 | RLS + counter-function tests | Linked-project pgTAP coverage passes for RLS/counters/clone/trending plus `save_creation` (19/19 via `supabase db query --linked --file supabase/tests/community_rls_counters.test.sql`). Local Docker remains unavailable, so local Supabase runner coverage is still pending. |
 | Supabase repository implementation | Done: shared contract runs against the Supabase repository fake client, and the opt-in live contract passed 8/8 against the linked hosted project on 2026-06-30 using a server-only service-role test-user setup. Profile, atomic `save_creation`, publish, star/unstar, clone RPC, trending, auth helpers, runtime config, migration, and returning-user hydration are covered. |
 | Browser auth UI + shared-action gating | Done: magic-link controls, sign-out fallback to local mode, local-to-cloud migration on sign-in, and publish/star/clone gating |
@@ -83,13 +83,15 @@ would block it. Same for `star_count`. Resolution:
   run with definer privileges, so they update the count column on a row the
   acting user cannot otherwise write — without granting clients direct write
   access to counts.
-- Cloning is done atomically through a **`clone_creation` RPC** (`SECURITY
-  DEFINER`) that validates the source is public, creates the caller-owned private
-  creation + version, and inserts the `remixes` row (which fires the count
-  trigger).
+- Cloning is done atomically through a **`clone_creation` RPC**. The public RPC
+  is `SECURITY INVOKER`; the privileged helper body lives in the private
+  `community_private` schema, validates the source is public, creates the
+  caller-owned private creation + version, and inserts the `remixes` row (which
+  fires the count trigger).
 - Saving is done atomically through a **`save_creation` RPC** (`SECURITY
-  DEFINER`) that validates the caller, inserts the caller-owned creation, inserts
-  the first version, and sets `current_version_id` in one database transaction.
+  INVOKER`) that validates the caller, inserts the caller-owned creation,
+  inserts the first version, and sets `current_version_id` in one database
+  transaction under normal table grants/RLS policies.
 
 RLS summary (full policies in the migration):
 
@@ -169,16 +171,19 @@ helper covered by the contract harness.
 5. `createCommunityRepository({ backend: 'supabase' })` runs the live app with no
    UI code changes.
 
-Current verification: on 2026-06-30, `npm run test:supabase:live` passed the
-8-test shared repository contract against the linked hosted project after the
-linked database reported 0 public creations. The local Docker runner remains
-environment-dependent and unavailable in this checkout, so hosted disposable
-verification is the accepted Phase 2 proof.
+Current verification: on 2026-06-30, `supabase migration list --linked` matched
+all local migrations through `20260630214126_harden_rpc_security_definer_exposure.sql`,
+`supabase db advisors --linked --type all --level warn --fail-on none` reported
+no issues, and `npm run test:supabase:live` passed the 8-test shared repository
+contract against the linked hosted project after the linked database reported 0
+public creations. The local Docker runner remains environment-dependent and
+unavailable in this checkout, so hosted disposable verification is the accepted
+Phase 2 proof.
 
 ### 2.10 Sequenced steps
 
-1. Provision Supabase project; apply `0001_community_schema.sql`. **Done**: linked metadata confirms the expected Community tables and functions exist, migration history has been repaired to match the authored local files, and `20260630145548_atomic_save_creation_rpc.sql` is applied.
-2. Harden exposed functions/views from security advisor output. **Done**.
+1. Provision Supabase project; apply `0001_community_schema.sql`. **Done**: linked metadata confirms the expected Community tables and functions exist, migration history has been repaired to match the authored local files, and `20260630214126_harden_rpc_security_definer_exposure.sql` is applied.
+2. Harden exposed functions/views from security advisor output. **Done**: public RPC wrappers are invoker-safe, privileged helper bodies live outside the exposed public schema, and linked advisors report no warning-level issues.
 3. RLS + counter-function tests against local Supabase. **Done against the linked project** for the current 19-check pgTAP suite, including `save_creation`; local Docker is still unavailable, and `supabase test db --linked` still requires Docker for the runner.
 4. Implement `createSupabaseCommunityRepository`; pass the contract suite. **Done**: profile/atomic-save/publish/star/clone/trending/auth-helper slices pass, the shared repository contract runs against the Supabase implementation via a fake Supabase client, cloned remixes hydrate their own version rows, returning signed-in users hydrate profile/build/version/star state, and the live harness passed 8/8 against the linked hosted project on 2026-06-30.
 5. Wire env-based config selection. **Done**: repository selection supports `client` or `supabaseUrl` + `supabaseAnonKey` + `createClient`, `server.mjs` injects safe runtime config into `index.html`, and the browser reads the inline `life-runtime-config` JSON tag.

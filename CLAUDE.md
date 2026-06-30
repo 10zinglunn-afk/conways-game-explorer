@@ -28,6 +28,6 @@ Default decisions:
 
 Execution priorities:
 
-1. Reconcile Supabase migration drift and verify the backend contract against a real Supabase instance.
+1. Keep Supabase migration history, advisors, and hosted contract checks green before future schema changes.
 2. Introduce TypeScript gradually without blocking current tests.
-3. Defer the Next.js/React migration until backend behavior and public-route requirements are settled.
+3. Start the Next.js/React migration only when public `/c/[slug]` and `/u/[username]` routes are the next product goal.

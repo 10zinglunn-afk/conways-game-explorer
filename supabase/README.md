@@ -24,7 +24,7 @@ The linked project previously had older remote migration-history entries
 this repo keeps the authored local files as `0001_community_schema.sql` plus the
 `2026062923050*` hardening files. That drift has been repaired: `supabase
 migration list --linked` now matches every local migration through
-`20260630145548_atomic_save_creation_rpc.sql`.
+`20260630214126_harden_rpc_security_definer_exposure.sql`.
 
 Run `supabase migration list --linked` before future `supabase db push` calls so
 new work starts from an aligned history.
@@ -42,11 +42,17 @@ new work starts from an aligned history.
 - `migrations/20260630145548_atomic_save_creation_rpc.sql` — authenticated
   `save_creation` RPC that saves a creation, first version, and
   `current_version_id` pointer in one database transaction.
+- `migrations/20260630214126_harden_rpc_security_definer_exposure.sql` — moves
+  privileged clone/view helper bodies into a private schema, keeps stable public
+  RPC wrappers as `SECURITY INVOKER`, and changes `save_creation` to run as an
+  invoker-protected RPC.
 - `tests/community_rls_counters.test.sql` — pgTAP coverage for public/private
   visibility, non-owner update denial, atomic save RPC behavior, star/clone
   counters, direct remix insert denial, clone RPC behavior, and the trending view.
   On the linked project this currently passes 19/19 via
   `supabase db query --linked --file supabase/tests/community_rls_counters.test.sql`.
+  `supabase db advisors --linked --type all --level warn --fail-on none`
+  currently reports no warning-level issues.
 
 ## Contract
 
