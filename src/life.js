@@ -28,6 +28,11 @@ export function getCell(board, x, y) {
   return board.cells[cellIndex(board, x, y)] === 1;
 }
 
+export function getCellBounded(board, x, y) {
+  if (x < 0 || y < 0 || x >= board.width || y >= board.height) return false;
+  return board.cells[y * board.width + x] === 1;
+}
+
 export function setCell(board, x, y, alive) {
   const next = cloneBoard(board);
   next.cells[cellIndex(next, x, y)] = alive ? 1 : 0;
@@ -41,27 +46,31 @@ export function toggleCell(board, x, y) {
   return next;
 }
 
-export function countNeighbors(board, x, y) {
+export function countNeighbors(board, x, y, { wrapping = true } = {}) {
   let count = 0;
 
   for (let dy = -1; dy <= 1; dy += 1) {
     for (let dx = -1; dx <= 1; dx += 1) {
       if (dx === 0 && dy === 0) continue;
-      if (getCell(board, x + dx, y + dy)) count += 1;
+      const alive = wrapping
+        ? getCell(board, x + dx, y + dy)
+        : getCellBounded(board, x + dx, y + dy);
+      if (alive) count += 1;
     }
   }
 
   return count;
 }
 
-export function nextGeneration(board) {
+export function nextGeneration(board, options = {}) {
+  const { wrapping = true } = options;
   const next = createBoard(board.width, board.height);
   next.generation = board.generation + 1;
 
   for (let y = 0; y < board.height; y += 1) {
     for (let x = 0; x < board.width; x += 1) {
       const alive = getCell(board, x, y);
-      const neighbors = countNeighbors(board, x, y);
+      const neighbors = countNeighbors(board, x, y, { wrapping });
       const survives = alive && (neighbors === 2 || neighbors === 3);
       const born = !alive && neighbors === 3;
       next.cells[cellIndex(next, x, y)] = survives || born ? 1 : 0;

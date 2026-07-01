@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
   getLiveToolAction,
   getNextTool,
+  getToolAfterWorkspaceChange,
+  getToolStatusMessage,
   shouldHideStampPreview,
+  shouldKeepPointerActiveAfterApply,
   getWheelZoomDelta,
 } from './interaction.js';
 
@@ -36,4 +39,32 @@ test('stamp preview hides after the active stamp tool is clicked again', () => {
 test('non-stamp tools still switch directly', () => {
   assert.equal(getNextTool({ currentTool: 'draw', requestedTool: 'erase' }), 'erase');
   assert.equal(getNextTool({ currentTool: 'erase', requestedTool: 'stamp' }), 'stamp');
+});
+
+test('stamp placement keeps the tool active for repeated placement', () => {
+  assert.equal(shouldKeepPointerActiveAfterApply({ pointerMode: 'stamp' }), true);
+  assert.equal(shouldKeepPointerActiveAfterApply({ pointerMode: 'draw' }), true);
+  assert.equal(shouldKeepPointerActiveAfterApply({ pointerMode: 'pan' }), false);
+});
+
+test('stamp status copy describes persistent stamping without paste-once language', () => {
+  const message = getToolStatusMessage({
+    tool: 'stamp',
+    selectedPresetName: 'Gosper glider gun',
+  });
+
+  assert.match(message, /Stamp on: Gosper glider gun/);
+  assert.doesNotMatch(message, /paste|click the board to paste|Place again/i);
+});
+
+test('draw status copy explains drawing-board erasing without a separate erase tool', () => {
+  const message = getToolStatusMessage({ tool: 'draw' });
+
+  assert.match(message, /drag from empty cells to paint/i);
+  assert.match(message, /drag from live cells while paused to erase/i);
+});
+
+test('switching workspaces clears active stamp state', () => {
+  assert.equal(getToolAfterWorkspaceChange({ currentTool: 'stamp' }), 'draw');
+  assert.equal(getToolAfterWorkspaceChange({ currentTool: 'draw' }), 'draw');
 });

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  addCreationComment,
   createCommunityState,
   createCreationDraft,
   createProfile,
@@ -48,6 +49,35 @@ test('creates private drafts with a share payload version', () => {
   assert.deepEqual(draft.tags, ['glider', 'clock', 'logic']);
   assert.equal(draft.currentVersion.rle.includes('bo$2bo$3o!'), true);
   assert.equal(draft.currentVersion.generation, 42);
+});
+
+test('creation drafts persist Dev Studio design settings', () => {
+  const profile = createProfile({
+    email: 'theme@example.com',
+    displayName: 'Theme Builder',
+    now: () => '2026-06-30T12:00:00.000Z',
+  });
+  const draft = createCreationDraft({
+    id: 'creation-themed',
+    profile,
+    title: 'Neon gun',
+    rle: 'x = 1, y = 1, rule = B3/S23\no!',
+    width: 120,
+    height: 90,
+    settings: {
+      width: 120,
+      height: 90,
+      liveCellColor: '#ff00aa',
+      wrapping: false,
+      renderStyle: 'glow',
+    },
+  });
+
+  assert.equal(draft.currentVersion.settings.width, 120);
+  assert.equal(draft.currentVersion.settings.height, 90);
+  assert.equal(draft.currentVersion.settings.liveCellColor, '#ff00aa');
+  assert.equal(draft.currentVersion.settings.wrapping, false);
+  assert.equal(draft.currentVersion.settings.renderStyle, 'glow');
 });
 
 test('publishes a creation without mutating the original draft', () => {
@@ -128,6 +158,51 @@ test('clones a public creation with remix lineage', () => {
   assert.equal(remix.rootCreationId, 'creation-source');
   assert.equal(remix.currentVersion.rle, source.currentVersion.rle);
   assert.equal(remix.starCount, 0);
+});
+
+test('clones preserve source design settings for remix drafts', () => {
+  const profile = createProfile({ email: 'clone@example.com', displayName: 'Clone User' });
+  const source = createCreationDraft({
+    id: 'creation-source',
+    profile,
+    title: 'Styled source',
+    rle: 'x = 1, y = 1, rule = B3/S23\no!',
+    settings: {
+      width: 180,
+      height: 120,
+      liveCellColor: '#22c55e',
+      wrapping: false,
+    },
+  });
+
+  const remix = cloneCreation(source, {
+    id: 'creation-remix',
+    profile,
+    now: () => '2026-06-30T14:00:00.000Z',
+  });
+
+  assert.equal(remix.currentVersion.settings.liveCellColor, '#22c55e');
+  assert.equal(remix.currentVersion.settings.wrapping, false);
+});
+
+test('comments increase comment count without mutating original creation', () => {
+  const creation = createCreationDraft({
+    id: 'creation-commented',
+    title: 'Commented',
+    rle: 'x = 1, y = 1, rule = B3/S23\no!',
+  });
+
+  const commented = addCreationComment(creation, {
+    profileId: 'profile-a',
+    authorName: 'Ada',
+    body: 'This remix chain is readable.',
+    now: () => '2026-06-30T20:00:00.000Z',
+  });
+
+  assert.equal(creation.commentCount, 0);
+  assert.equal(commented.commentCount, 1);
+  assert.equal(commented.comments[0].authorName, 'Ada');
+  assert.equal(commented.comments[0].body, 'This remix chain is readable.');
 });
 
 test('trending favors recent public creations with activity', () => {

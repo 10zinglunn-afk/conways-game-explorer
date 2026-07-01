@@ -19,6 +19,15 @@ test('counts neighbors across toroidal board edges', () => {
   assert.equal(countNeighbors(board, 0, 0), 3);
 });
 
+test('bounded neighbor counts do not wrap across board edges', () => {
+  let board = createBoard(5, 5);
+  board = setCell(board, 4, 4, true);
+  board = setCell(board, 0, 4, true);
+  board = setCell(board, 4, 0, true);
+
+  assert.equal(countNeighbors(board, 0, 0, { wrapping: false }), 0);
+});
+
 test('births a dead cell with exactly three live neighbors', () => {
   let board = createBoard(5, 5);
   board = setCell(board, 1, 0, true);
@@ -28,6 +37,19 @@ test('births a dead cell with exactly three live neighbors', () => {
   const next = nextGeneration(board);
 
   assert.equal(getCell(next, 0, 1), true);
+});
+
+test('bounded generation does not birth cells from wrapped neighbors', () => {
+  let board = createBoard(3, 3);
+  board = setCell(board, 0, 0, true);
+  board = setCell(board, 2, 0, true);
+  board = setCell(board, 0, 2, true);
+
+  const wrapped = nextGeneration(board);
+  const bounded = nextGeneration(board, { wrapping: false });
+
+  assert.equal(getCell(wrapped, 2, 2), true);
+  assert.equal(getCell(bounded, 2, 2), false);
 });
 
 test('kills a live cell with fewer than two live neighbors', () => {

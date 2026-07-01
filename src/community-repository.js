@@ -254,9 +254,10 @@ export function createSupabaseCommunityRepository({
       );
       assertSupabaseOk(error);
 
-      const creation = await hydrateCreation(data, {
+      const hydrated = await hydrateCreation(data, {
         ownerName: state.profile.displayName,
       });
+      const creation = withVersionSettings(hydrated, version.settings);
       state = {
         ...state,
         creations: replaceCreation(state.creations, creation),
@@ -343,9 +344,10 @@ export function createSupabaseCommunityRepository({
       });
       assertSupabaseOk(error);
 
-      const remix = await hydrateCreation(data, {
+      const hydrated = await hydrateCreation(data, {
         ownerName: profile.displayName,
       });
+      const remix = withVersionSettings(hydrated, draft.currentVersion.settings);
       const countedSource = incrementCloneCount(source);
       state = {
         ...state,
@@ -535,6 +537,18 @@ function fromVersionRow(row) {
     population: Number(row?.population || 0),
     rule: row?.rule || 'B3/S23',
     createdAt: row?.created_at,
+  };
+}
+
+function withVersionSettings(creation, settings) {
+  if (!settings) return creation;
+
+  return {
+    ...creation,
+    currentVersion: {
+      ...creation.currentVersion,
+      settings,
+    },
   };
 }
 

@@ -36,6 +36,27 @@ export function runCommunityRepositoryContract(label, makeRepo) {
     assert.equal(repo.findCreation(draft.id).id, draft.id);
   });
 
+  test(`[${label}] saveCreation persists design settings metadata`, async () => {
+    const repo = await withProfile();
+    const draft = await repo.saveCreation({
+      title: 'Styled build',
+      rle: SAMPLE_RLE,
+      width: 180,
+      height: 120,
+      settings: {
+        width: 180,
+        height: 120,
+        liveCellColor: '#ff00aa',
+        wrapping: false,
+        renderStyle: 'glow',
+      },
+    });
+
+    assert.equal(draft.currentVersion.settings.liveCellColor, '#ff00aa');
+    assert.equal(draft.currentVersion.settings.wrapping, false);
+    assert.equal(repo.findCreation(draft.id).currentVersion.settings.renderStyle, 'glow');
+  });
+
   test(`[${label}] saveCreation with publish flag publishes immediately`, async () => {
     const repo = await withProfile();
     const creation = await repo.saveCreation({ title: 'Block', rle: SAMPLE_RLE }, { publish: true });
@@ -68,11 +89,20 @@ export function runCommunityRepositoryContract(label, makeRepo) {
   test(`[${label}] cloneCreation records lineage and increments the source clone count`, async () => {
     const repo = await withProfile();
     const profile = repo.getState().profile;
-    const source = await repo.saveCreation({ title: 'Signal Gate', rle: SAMPLE_RLE }, { publish: true });
+    const source = await repo.saveCreation({
+      title: 'Signal Gate',
+      rle: SAMPLE_RLE,
+      settings: {
+        liveCellColor: '#22c55e',
+        wrapping: false,
+      },
+    }, { publish: true });
     const remix = await repo.cloneCreation(source.id, profile);
     assert.equal(remix.visibility, 'private');
     assert.equal(remix.remixedFromId, source.id);
     assert.equal(remix.rootCreationId, source.id);
+    assert.equal(remix.currentVersion.settings.liveCellColor, '#22c55e');
+    assert.equal(remix.currentVersion.settings.wrapping, false);
     assert.equal(repo.findCreation(source.id).cloneCount, 1);
   });
 

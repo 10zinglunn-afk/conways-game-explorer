@@ -1,3 +1,8 @@
+import {
+  createDesignSettings,
+  serializeDesignSettings,
+} from './design-settings.js';
+
 export const COMMUNITY_STORAGE_KEY = 'life-logic-community-v1';
 
 export function createCommunityState(overrides = {}) {
@@ -48,11 +53,25 @@ export function createCreationDraft({
   population = 0,
   thumbnail = '',
   parentCreation = null,
+  settings = null,
+  comments = [],
   now = () => new Date().toISOString(),
 } = {}) {
   const createdAt = now();
   const creationId = id || `creation-${hashString(`${profile?.id || 'local'}:${title}:${rle}:${createdAt}`)}`;
   const cleanTitle = String(title || 'Untitled Life build').trim();
+  const designInput = {
+    ...(settings || {}),
+  };
+
+  if (!designInput.gridPreset && (designInput.width || designInput.height || width || height)) {
+    designInput.gridPreset = 'custom';
+  }
+  if (designInput.width === undefined && width !== undefined) designInput.width = width;
+  if (designInput.height === undefined && height !== undefined) designInput.height = height;
+
+  const versionSettings = serializeDesignSettings(createDesignSettings(designInput));
+  const normalizedComments = normalizeComments(comments);
 
   return {
     id: creationId,
@@ -67,6 +86,8 @@ export function createCreationDraft({
     starCount: 0,
     cloneCount: 0,
     viewCount: 0,
+    commentCount: normalizedComments.length,
+    comments: normalizedComments,
     starredBy: [],
     remixedFromId: parentCreation?.id || null,
     rootCreationId: parentCreation?.rootCreationId || parentCreation?.id || creationId,
@@ -78,6 +99,7 @@ export function createCreationDraft({
       generation: Number(generation || 0),
       population: Number(population || 0),
       rule: 'B3/S23',
+      settings: versionSettings,
       createdAt,
     },
     createdAt,
@@ -141,9 +163,37 @@ export function cloneCreation(source, {
     generation: source.currentVersion?.generation,
     population: source.currentVersion?.population,
     thumbnail: source.thumbnail,
+    settings: source.currentVersion?.settings,
     parentCreation: source,
     now,
   });
+}
+
+export function addCreationComment(creation, {
+  profileId = 'profile-local',
+  authorName = 'Life Builder',
+  body,
+  now = () => new Date().toISOString(),
+} = {}) {
+  const cleanBody = String(body || '').trim();
+  if (!cleanBody) return creation;
+
+  const createdAt = now();
+  const comment = {
+    id: `comment-${hashString(`${creation.id}:${profileId}:${cleanBody}:${createdAt}`)}`,
+    profileId,
+    authorName: String(authorName || 'Life Builder').trim(),
+    body: cleanBody,
+    createdAt,
+  };
+  const comments = [...normalizeComments(creation.comments), comment];
+
+  return {
+    ...creation,
+    comments,
+    commentCount: comments.length,
+    updatedAt: createdAt,
+  };
 }
 
 export function getTrendingCreations(creations, { now = () => new Date() } = {}) {
@@ -219,6 +269,20 @@ function normalizeTags(tags) {
   }
 
   return [...seen];
+}
+
+function normalizeComments(comments) {
+  if (!Array.isArray(comments)) return [];
+
+  return comments
+    .map((comment) => ({
+      id: String(comment.id || `comment-${hashString(comment.body || '')}`),
+      profileId: String(comment.profileId || 'profile-local'),
+      authorName: String(comment.authorName || 'Life Builder').trim(),
+      body: String(comment.body || '').trim(),
+      createdAt: String(comment.createdAt || new Date().toISOString()),
+    }))
+    .filter((comment) => comment.body);
 }
 
 function getIdSuffix(id) {
