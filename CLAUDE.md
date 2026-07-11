@@ -31,3 +31,10 @@ Execution priorities:
 1. Keep Supabase migration history, advisors, and hosted contract checks green before future schema changes.
 2. Introduce TypeScript gradually without blocking current tests.
 3. Start the Next.js/React migration only when public `/c/[slug]` and `/u/[username]` routes are the next product goal.
+
+## Current execution status
+
+- Phase 0 of `docs/full-publishing-flow-plan.md` is stabilized with Node and
+  Playwright coverage for Playground, Dev Studio, Community, and mobile layouts.
+- Playwright browser tests live in `tests/browser` and run with
+  `npm run test:e2e`.

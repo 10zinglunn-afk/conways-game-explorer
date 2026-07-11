@@ -18,6 +18,10 @@ npm run dev
 
 Open http://127.0.0.1:5173.
 
+The stabilized workspace shell includes responsive Playground, Dev Studio, and
+Community surfaces. Dev Studio keeps the active local editing session when you
+visit another workspace and return.
+
 ## Community Cloud
 
 Local drafts work with no network config. To enable the Supabase-backed community UI, run the dev server with:
@@ -61,9 +65,14 @@ Call to action: try the playground, star the repo, and share a pattern or logic 
 
 ```bash
 npm test
+npm run test:e2e
 node --check src/app.js
 node --check src/community.js
 node --check src/patterns.js
 node --check src/presets.js
 node --check server.mjs
 ```
+
+The Playwright suite covers the three workspaces in desktop Chromium and an
+iPhone-sized Chromium viewport. Install its browser runtime once with
+`npx playwright install chromium`.

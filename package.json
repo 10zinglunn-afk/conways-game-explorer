@@ -5,11 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "node server.mjs",
+    "test:e2e": "playwright test",
     "test:supabase:live": "node --test src/community-repository.supabase.integration.test.js",
     "test": "node --test",
     "start": "node server.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.110.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
   }
 }
