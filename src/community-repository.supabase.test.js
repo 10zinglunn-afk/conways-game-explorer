@@ -256,8 +256,8 @@ test('cloneCreation calls the clone RPC and caches the private remix', async () 
     functionName: 'clone_creation',
     payload: {
       source_id: source.id,
-      new_slug: 'signal-gate-remix-000000000002',
-      new_title: 'Signal Gate Remix',
+      new_slug: 'ada-lovelaces-version-of-signal-gate-000000000002',
+      new_title: "Ada Lovelace's version of Signal Gate",
     },
   });
 });

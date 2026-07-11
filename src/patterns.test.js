@@ -6,10 +6,12 @@ import {
   getPresetGroup,
   normalizeCoordinates,
   parseRle,
+  transformCoordinates,
 } from './patterns.js';
 import {
   presetGroups,
   presets,
+  getPresetStampSummary,
 } from './presets.js';
 
 test('calculates pattern bounds from sparse coordinates', () => {
@@ -28,6 +30,30 @@ test('normalizes coordinates to start at zero', () => {
     [0, 0],
     [1, 0],
     [2, 2],
+  ]);
+});
+
+test('rotates stamp coordinates clockwise and normalizes them', () => {
+  assert.deepEqual(transformCoordinates([
+    [0, 0],
+    [0, 1],
+    [1, 1],
+  ], { rotation: 90 }), [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+  ]);
+});
+
+test('flips stamp coordinates horizontally after rotation', () => {
+  assert.deepEqual(transformCoordinates([
+    [0, 0],
+    [1, 0],
+    [1, 1],
+  ], { rotation: 180, flipX: true }), [
+    [1, 0],
+    [0, 1],
+    [1, 1],
   ]);
 });
 
@@ -71,4 +97,9 @@ test('preset groups cover each preset once for library tabs', () => {
 test('finds a preset group by tab id', () => {
   assert.equal(getPresetGroup(presetGroups, 'motion')?.title, 'Motion');
   assert.equal(getPresetGroup(presetGroups, 'missing'), null);
+});
+
+test('preset stamp summary labels multi-piece showcase stamps clearly', () => {
+  assert.equal(getPresetStampSummary(presets.find((preset) => preset.id === 'gosper-gun')), 'Single stamp');
+  assert.equal(getPresetStampSummary(presets.find((preset) => preset.id === 'gun-battery')), '3-piece stamp');
 });

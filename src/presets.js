@@ -506,6 +506,7 @@ export const presets = [
     id: 'gun-battery',
     name: 'Glider gun battery',
     note: 'Three Gosper guns staggered into a machine wall that throws streams across the board.',
+    pieceCount: 3,
     coordinates: combine([
       at(GOSPER_GUN, 0, 0),
       at(GOSPER_GUN, 0, 24),
@@ -582,6 +583,12 @@ export const presets = [
     ]),
   },
 ];
+
+export function getPresetStampSummary(preset) {
+  if (!preset) return '';
+  const pieceCount = preset.pieceCount || 1;
+  return pieceCount === 1 ? 'Single stamp' : `${pieceCount}-piece stamp`;
+}
 
 export const presetGroups = [
   {

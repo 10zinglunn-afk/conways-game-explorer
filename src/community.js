@@ -154,7 +154,7 @@ export function cloneCreation(source, {
   return createCreationDraft({
     id,
     profile,
-    title: `${source.title} Remix`,
+    title: createRemixTitle({ sourceTitle: source.title, profile }),
     description: source.description,
     tags: source.tags,
     rle: source.currentVersion?.rle,
@@ -167,6 +167,12 @@ export function cloneCreation(source, {
     parentCreation: source,
     now,
   });
+}
+
+export function createRemixTitle({ sourceTitle, profile } = {}) {
+  const owner = String(profile?.displayName || profile?.username || 'My').trim() || 'My';
+  const suffix = owner.toLowerCase().endsWith('s') ? "'" : "'s";
+  return `${owner}${suffix} version of ${String(sourceTitle || 'Untitled design').trim() || 'Untitled design'}`;
 }
 
 export function addCreationComment(creation, {

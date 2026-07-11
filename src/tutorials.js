@@ -186,6 +186,25 @@ const TUTORIALS = [
   }),
 ];
 
+const PLAYGROUND_INTRO_STEPS = [
+  {
+    title: "Welcome to Conway's Game: the rules are alive",
+    body: 'Every square is a tiny creature. Click through the rules, then you land in the playground.',
+  },
+  {
+    title: 'Birth',
+    body: 'An empty cell with exactly 3 live neighbors turns on next step.',
+  },
+  {
+    title: 'Survival',
+    body: 'A live cell with 2 or 3 live neighbors stays alive.',
+  },
+  {
+    title: 'Lonely or crowded',
+    body: 'A live cell with too few or too many neighbors gets lonely or crowded. Either way, it dies.',
+  },
+];
+
 export function getTutorialCatalog() {
   return TUTORIALS.map((tutorialEntry) => ({
     ...tutorialEntry,
@@ -199,6 +218,10 @@ export function getTutorialGroups() {
 
 export function getTutorialsByGroup(groupId) {
   return getTutorialCatalog().filter((tutorialEntry) => tutorialEntry.group === groupId);
+}
+
+export function getPlaygroundIntroSteps() {
+  return PLAYGROUND_INTRO_STEPS.map((step) => ({ ...step }));
 }
 
 function tutorial(input) {

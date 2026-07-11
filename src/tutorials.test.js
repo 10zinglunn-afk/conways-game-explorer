@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  getPlaygroundIntroSteps,
   getTutorialCatalog,
   getTutorialGroups,
   getTutorialsByGroup,
@@ -30,4 +31,13 @@ test('loadable tutorials include a goal and modification prompt', () => {
 
   assert.equal(loadable.length > 8, true);
   assert.equal(loadable.every((tutorial) => tutorial.goal && tutorial.modifyPrompt), true);
+});
+
+test('playground intro teaches the living rules before opening the board', () => {
+  const steps = getPlaygroundIntroSteps();
+
+  assert.equal(steps[0].title, "Welcome to Conway's Game: the rules are alive");
+  assert.equal(steps.some((step) => /exactly 3/i.test(step.body)), true);
+  assert.equal(steps.some((step) => /2 or 3/i.test(step.body)), true);
+  assert.equal(steps.some((step) => /lonely or crowded/i.test(step.body)), true);
 });

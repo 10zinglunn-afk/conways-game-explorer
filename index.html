@@ -12,24 +12,86 @@
         <canvas id="intro-canvas" aria-hidden="true"></canvas>
         <div class="intro-chrome">
           <div class="intro-scanline" aria-hidden="true"></div>
-          <button id="intro-start" class="intro-start" type="button" disabled>
-            <span id="intro-prompt">LOADING</span>
-          </button>
-          <p class="intro-help">Click start or press Enter</p>
+          <div class="intro-entry" aria-label="Arcade entry">
+            <p id="intro-card-title" class="intro-title">Conway Arcade</p>
+            <div id="intro-profile-fields" class="intro-profile-fields" hidden>
+              <label for="intro-name">
+                <span>What's your name?</span>
+                <input id="intro-name" type="text" autocomplete="name" placeholder="Ada Lovelace" />
+              </label>
+              <label for="intro-email">
+                <span>What's your email?</span>
+                <input id="intro-email" type="email" autocomplete="email" placeholder="ada@example.com" />
+              </label>
+            </div>
+            <div class="intro-actions">
+              <button id="intro-start" class="intro-start" type="button" disabled>
+                <span id="intro-prompt">LOADING</span>
+              </button>
+              <button id="intro-skip" class="intro-skip" type="button">Develop</button>
+            </div>
+          </div>
+          <p id="intro-help" class="intro-help">Play now, or create a builder card for Dev Studio.</p>
         </div>
       </section>
 
       <canvas id="world" aria-label="Conway's Game of Life board"></canvas>
 
-      <section class="topbar" aria-label="Simulation controls">
+      <section id="playground-tutorial" class="playground-tutorial" aria-label="Playground tutorial" hidden>
+        <div class="tutorial-arcade-screen">
+          <div class="tutorial-mini-grid" aria-hidden="true">
+            <span></span><span class="live"></span><span></span>
+            <span class="live"></span><span class="live focus"></span><span class="live"></span>
+            <span></span><span class="live"></span><span></span>
+          </div>
+          <div class="tutorial-copy">
+            <p id="playground-tutorial-kicker">Rule 1 / 4</p>
+            <h2 id="playground-tutorial-title">Welcome to Conway's Game: the rules are alive</h2>
+            <p id="playground-tutorial-body">Every square is a tiny creature. Click through the rules, then you land in the playground.</p>
+          </div>
+          <div class="tutorial-actions">
+            <button id="playground-tutorial-skip" type="button">Skip</button>
+            <button id="playground-tutorial-next" class="primary" type="button">Next</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="arcade-rail" aria-label="Arcade workspace selector">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true"></span>
           <div>
             <h1>Conway's Game</h1>
-            <p>Toroidal world, finite canvas</p>
+            <p>Life logic arcade</p>
           </div>
         </div>
 
+        <div class="player-card" aria-label="Current player">
+          <span>Player</span>
+          <strong id="player-name">Guest Builder</strong>
+          <small id="player-meta">Play around or create a profile</small>
+        </div>
+
+        <nav class="workspace-dock" aria-label="Workspaces">
+          <button id="mode-playground" class="active" type="button" aria-current="page">
+            <span class="button-icon" aria-hidden="true">✎</span>
+            <span>Playground</span>
+            <small>Draw and run</small>
+          </button>
+          <button id="mode-dev" type="button">
+            <span class="button-icon" aria-hidden="true">⚙</span>
+            <span>Dev Studio</span>
+            <small>Build logic</small>
+          </button>
+          <button id="mode-community" type="button">
+            <span class="button-icon" aria-hidden="true">★</span>
+            <span>Community</span>
+            <small>Feed and remixes</small>
+          </button>
+        </nav>
+
+      </aside>
+
+      <section class="rail-block transport-block" aria-label="Simulation controls">
         <div class="transport">
           <button id="play-toggle" class="primary" type="button" aria-label="Play simulation">
             <span class="button-icon" aria-hidden="true">▶</span>
@@ -48,52 +110,63 @@
             <span>Soup</span>
           </button>
         </div>
-
-        <nav class="workspace-dock" aria-label="Workspaces">
-          <button id="mode-playground" class="active" type="button" aria-current="page">
-            <span class="button-icon" aria-hidden="true">✎</span>
-            <span>Playground</span>
-          </button>
-          <button id="mode-dev" type="button">
-            <span class="button-icon" aria-hidden="true">⚙</span>
-            <span>Dev Studio</span>
-          </button>
-          <button id="mode-community" type="button">
-            <span class="button-icon" aria-hidden="true">★</span>
-            <span>Community</span>
-          </button>
-        </nav>
+        <div class="transport-tempo" aria-label="Tempo controls">
+          <label for="speed">
+            <span>Tempo</span>
+            <strong id="speed-label">10 gen/s</strong>
+          </label>
+          <div class="tempo-stepper">
+            <button type="button" data-speed-step="-1" aria-label="Slow down">-</button>
+            <input id="speed" type="range" min="1" max="40" value="10" />
+            <button type="button" data-speed-step="1" aria-label="Speed up">+</button>
+          </div>
+          <span id="zoom-label" class="sr-only">100%</span>
+          <input id="zoom" class="sr-only" type="range" min="18" max="360" value="100" tabindex="-1" />
+          <input id="age-colors" class="sr-only" type="checkbox" checked tabindex="-1" />
+        </div>
       </section>
 
-      <aside class="panel" aria-label="Explorer panel">
-        <section class="panel-section walkthrough-panel playground-panel">
-          <h2>First Walkthrough</h2>
-          <ol class="walkthrough-list">
-            <li>Start blank. Click or drag cells to draw a seed.</li>
-            <li>Paused only: click a lit cell once to turn it off.</li>
-            <li>Click a pattern to turn Stamp on, then place as many copies as you want.</li>
-            <li>Press Play and watch what survives, travels, or explodes.</li>
-          </ol>
-        </section>
+      <button id="tool-drawer-toggle" class="tool-drawer-toggle" type="button" aria-controls="tool-panel" aria-expanded="true">
+        <span aria-hidden="true">▣</span>
+        <span data-tool-drawer-label>Open Tools</span>
+      </button>
 
-        <section class="panel-section draw-panel playground-panel">
-          <h2>Cells</h2>
-          <div class="segmented" role="radiogroup" aria-label="Drawing tool">
+      <aside id="tool-panel" class="panel" aria-label="Explorer panel">
+        <div class="panel-header">
+          <h2>Tools</h2>
+          <button id="tool-drawer-close" class="drawer-close" type="button">Close Tools</button>
+        </div>
+
+        <details class="panel-section draw-panel playground-panel collapsible-panel" open>
+          <summary><h2>Cells</h2></summary>
+          <div class="segmented tool-segmented" role="radiogroup" aria-label="Drawing tool">
             <button class="active" type="button" data-tool="draw" role="radio" aria-checked="true">
               <span class="button-icon" aria-hidden="true">✎</span>
               <span>Draw</span>
+            </button>
+            <button type="button" data-tool="pan" role="radio" aria-checked="false">
+              <span class="button-icon" aria-hidden="true">✥</span>
+              <span>Pan</span>
             </button>
             <button type="button" data-tool="stamp" role="radio" aria-checked="false">
               <span class="button-icon" aria-hidden="true">▣</span>
               <span data-stamp-label>Stamp</span>
             </button>
           </div>
-          <p class="hint">Draw behaves like a drawing board: start on empty cells to paint, or start on live cells while paused to erase. Stamp stays on until you turn it off.</p>
-        </section>
+          <p class="hint">Draw paints or erases paused live cells. Pan moves the board. Stamp places repeated copies.</p>
+          <p id="stamp-summary" class="stamp-summary" hidden></p>
+          <button id="stamp-off" class="stamp-off" type="button" hidden>Turn Stamp Off</button>
+          <div class="stamp-controls" aria-label="Stamp transform controls">
+            <button id="stamp-rotate-left" type="button" aria-label="Rotate stamp left">↶</button>
+            <span id="stamp-transform-label">0°</span>
+            <button id="stamp-rotate-right" type="button" aria-label="Rotate stamp right">↷</button>
+            <button id="stamp-flip" type="button" aria-pressed="false">Flip</button>
+          </div>
+        </details>
 
         <section id="dev-panel" class="panel-section dev-panel" aria-label="Dev Studio workspace">
-          <div class="dev-studio-layout">
-            <aside class="dev-rail" aria-label="Dev profile and saved designs">
+          <div class="dev-start-screen" aria-label="Dev Studio launcher">
+            <div class="dev-start-copy">
               <div class="section-heading">
                 <h2>Dev Studio</h2>
                 <span id="dev-dirty-state">Saved</span>
@@ -102,6 +175,14 @@
                 <strong id="dev-profile-name">Local Builder</strong>
                 <span id="dev-profile-meta">Create a profile to track designs.</span>
               </div>
+              <p class="hint">Start with a blank design or a named project. The board opens clean, and the tool drawer can pop in when you need stamps, lessons, or settings.</p>
+              <div class="dev-launch-actions">
+                <button id="dev-create-design" class="primary" type="button">Create New Design</button>
+                <button id="dev-create-project" type="button">Create New Project</button>
+              </div>
+            </div>
+
+            <aside class="dev-start-side" aria-label="Dev profile and saved designs">
               <div class="profile-stats" aria-label="Design stats">
                 <div><strong id="dev-design-count">0</strong><span>Designs</span></div>
                 <div><strong id="dev-draft-count">0</strong><span>Drafts</span></div>
@@ -120,11 +201,24 @@
                 <div id="dev-project-list" class="project-list"></div>
               </div>
             </aside>
+          </div>
 
-            <section class="dev-command-strip" aria-label="Dev build commands">
+          <div class="dev-toolbox" aria-label="Dev project tools">
+            <details class="panel-section dev-design-panel collapsible-panel" open>
+              <summary><h2>Design</h2><span id="dev-session-state">New</span></summary>
+              <label for="dev-design-title">Name</label>
+              <input id="dev-design-title" type="text" placeholder="Untitled design" />
+              <div class="button-row">
+                <button id="save-design" type="button">Save Draft</button>
+                <button id="publish-design" type="button">Publish</button>
+              </div>
+            </details>
+
+            <details class="panel-section dev-command-strip collapsible-panel" open>
+              <summary><h2>Logic Kit</h2><span>Signals</span></summary>
               <div class="section-heading">
-                <h2>Logic Kit</h2>
-                <span>Signals</span>
+                <h2>Prebuilt Things</h2>
+                <span>Stampable</span>
               </div>
               <div class="dev-grid">
                 <button type="button" data-dev-component="glider"><span>Signal</span><small>moving bit</small></button>
@@ -144,17 +238,13 @@
                 <button type="button" data-dev-claim="population">Snapshot</button>
               </div>
               <p id="dev-output" class="dev-output">Choose a component, stamp it, then run a claim check.</p>
-              <div class="button-row">
-                <button id="save-design" type="button">Save Draft</button>
-                <button id="publish-design" type="button">Publish</button>
-              </div>
-            </section>
+            </details>
 
-            <aside class="dev-inspector" aria-label="Dev settings and tutorials">
+            <details class="panel-section dev-inspector collapsible-panel">
+              <summary><h2>Grid</h2><span id="dev-grid-summary">300 x 200</span></summary>
               <section class="inspector-block">
                 <div class="section-heading">
                   <h2>Grid</h2>
-                  <span id="dev-grid-summary">300 x 200</span>
                 </div>
                 <label for="grid-preset">Size</label>
                 <select id="grid-preset">
@@ -175,11 +265,13 @@
                   <input id="wrap-toggle" type="checkbox" checked />
                 </label>
               </section>
+            </details>
 
+            <details class="panel-section dev-inspector collapsible-panel">
+              <summary><h2>Style</h2><span id="dev-style-summary">square cells</span></summary>
               <section class="inspector-block">
                 <div class="section-heading">
                   <h2>Style</h2>
-                  <span id="dev-style-summary">square cells</span>
                 </div>
                 <label for="render-style">Cell style</label>
                 <select id="render-style">
@@ -204,17 +296,19 @@
                   <label for="selection-color">Selection<input id="selection-color" type="color" value="#fbbf24" /></label>
                 </div>
               </section>
+            </details>
 
+            <details class="panel-section dev-inspector collapsible-panel">
+              <summary><h2>Tutorials</h2><span id="tutorial-count">0</span></summary>
               <section class="inspector-block">
                 <div class="section-heading">
                   <h2>Tutorials</h2>
-                  <span id="tutorial-count">0</span>
                 </div>
                 <div id="tutorial-groups" class="pattern-tabs compact-tabs" role="tablist" aria-label="Tutorial groups"></div>
                 <div id="tutorial-list" class="tutorial-list"></div>
                 <p id="tutorial-output" class="dev-output">Load a lesson to study, modify, and save as a draft.</p>
               </section>
-            </aside>
+            </details>
           </div>
         </section>
 
@@ -258,7 +352,20 @@
             <section class="community-stream" aria-label="Community design stream">
               <div class="stream-toolbar">
                 <input id="community-search" type="search" placeholder="Search designs, tags, or authors" />
-                <select id="community-filter" aria-label="Community feed filter">
+                <div class="custom-select" data-custom-select="community-filter">
+                  <button id="community-filter-button" type="button" aria-haspopup="listbox" aria-expanded="false">
+                    <span id="community-filter-label">All streams</span>
+                    <span aria-hidden="true">⌄</span>
+                  </button>
+                  <div id="community-filter-menu" class="custom-select-menu" role="listbox" aria-label="Community feed filter">
+                    <button type="button" role="option" data-community-filter-value="all" aria-selected="true">All streams</button>
+                    <button type="button" role="option" data-community-filter-value="famous" aria-selected="false">Famous</button>
+                    <button type="button" role="option" data-community-filter-value="trending" aria-selected="false">Trending</button>
+                    <button type="button" role="option" data-community-filter-value="new" aria-selected="false">New</button>
+                    <button type="button" role="option" data-community-filter-value="remixes" aria-selected="false">Remixes</button>
+                  </div>
+                </div>
+                <select id="community-filter" class="sr-only" aria-label="Community feed filter" tabindex="-1">
                   <option value="all">All streams</option>
                   <option value="famous">Famous</option>
                   <option value="trending">Trending</option>
@@ -295,60 +402,31 @@
           </div>
         </section>
 
-        <section class="panel-section library-panel playground-panel">
-          <div class="section-heading">
-            <h2>Pattern Library</h2>
-            <span id="preset-count"></span>
-          </div>
+        <details class="panel-section library-panel playground-panel collapsible-panel" open>
+          <summary><h2>Pattern Library</h2><span id="preset-count"></span></summary>
           <p class="hint">Drag a card onto the board, or click a card to turn Stamp on for repeated placement.</p>
           <div id="pattern-tabs" class="pattern-tabs" role="tablist" aria-label="Pattern groups"></div>
           <div id="presets" class="preset-list"></div>
-        </section>
+        </details>
 
-        <section class="panel-section tempo-panel">
-          <h2>Tempo</h2>
-          <label class="range-row" for="speed">
-            <span>Speed</span>
-            <strong id="speed-label">10 gen/s</strong>
-          </label>
-          <div class="stepper-row">
-            <button type="button" data-speed-step="-1" aria-label="Slow down">-</button>
-            <input id="speed" type="range" min="1" max="40" value="10" />
-            <button type="button" data-speed-step="1" aria-label="Speed up">+</button>
-          </div>
-          <label class="range-row" for="zoom">
-            <span>Zoom</span>
-            <strong id="zoom-label">100%</strong>
-          </label>
-          <div class="stepper-row">
-            <button type="button" data-zoom-step="-20" aria-label="Zoom out">-</button>
-            <input id="zoom" type="range" min="18" max="360" value="100" />
-            <button type="button" data-zoom-step="10" aria-label="Zoom in">+</button>
-          </div>
-          <label class="toggle-row" for="age-colors">
-            <span>Age colors</span>
-            <input id="age-colors" type="checkbox" checked />
-          </label>
-        </section>
-
-        <section class="panel-section graph-panel playground-panel">
-          <h2>Population Graph</h2>
+        <details class="panel-section graph-panel playground-panel collapsible-panel">
+          <summary><h2>Population Graph</h2></summary>
           <canvas id="population-chart" width="300" height="92" aria-label="Population history chart"></canvas>
           <p class="hint">Tracks live cell count over time so you can spot collapse, growth, and repeating rhythms.</p>
-        </section>
+        </details>
 
-        <section class="panel-section clipboard-panel playground-panel">
-          <h2>Import / Export RLE</h2>
+        <details class="panel-section clipboard-panel playground-panel collapsible-panel">
+          <summary><h2>Import / Export RLE</h2></summary>
           <p class="hint">Add RLE text from a Life pattern page, then turn it into a reusable Stamp. Export copies the current board as RLE text.</p>
           <textarea id="rle-field" spellcheck="false" placeholder="RLE text goes here, then choose Stamp RLE"></textarea>
           <div class="button-row">
             <button id="import-rle" type="button">Stamp RLE</button>
             <button id="export-rle" type="button">Export Board</button>
           </div>
-        </section>
+        </details>
 
-        <section class="panel-section stats stats-panel playground-panel">
-          <h2>World Stats</h2>
+        <details class="panel-section stats stats-panel playground-panel collapsible-panel">
+          <summary><h2>World Stats</h2></summary>
           <dl>
             <div>
               <dt>Generation</dt>
@@ -367,12 +445,8 @@
               <dd id="board-size">300 × 200</dd>
             </div>
           </dl>
-        </section>
+        </details>
 
-        <section class="panel-section rules rules-panel playground-panel">
-          <h2>Rules</h2>
-          <p>Dead cells with exactly 3 live neighbors are born. Live cells survive with 2 or 3 neighbors; otherwise they fade out.</p>
-        </section>
       </aside>
 
       <div class="hud" aria-live="polite">

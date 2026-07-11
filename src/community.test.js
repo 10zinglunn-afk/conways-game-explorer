@@ -5,6 +5,7 @@ import {
   createCommunityState,
   createCreationDraft,
   createProfile,
+  createRemixTitle,
   cloneCreation,
   getTrendingCreations,
   publishCreation,
@@ -49,6 +50,26 @@ test('creates private drafts with a share payload version', () => {
   assert.deepEqual(draft.tags, ['glider', 'clock', 'logic']);
   assert.equal(draft.currentVersion.rle.includes('bo$2bo$3o!'), true);
   assert.equal(draft.currentVersion.generation, 42);
+});
+
+test('names remixes as the player version of the source design', () => {
+  assert.equal(
+    createRemixTitle({
+      sourceTitle: 'Gosper glider gun',
+      profile: { displayName: 'Tenzing' },
+    }),
+    "Tenzing's version of Gosper glider gun",
+  );
+});
+
+test('names remixes with possessive names that already end in s', () => {
+  assert.equal(
+    createRemixTitle({
+      sourceTitle: 'Pulsar',
+      profile: { username: 'jess' },
+    }),
+    "jess' version of Pulsar",
+  );
 });
 
 test('creation drafts persist Dev Studio design settings', () => {
@@ -153,7 +174,7 @@ test('clones a public creation with remix lineage', () => {
   });
 
   assert.equal(remix.visibility, 'private');
-  assert.equal(remix.title, 'Signal Gate Remix');
+  assert.equal(remix.title, "Clone User's version of Signal Gate");
   assert.equal(remix.remixedFromId, 'creation-source');
   assert.equal(remix.rootCreationId, 'creation-source');
   assert.equal(remix.currentVersion.rle, source.currentVersion.rle);

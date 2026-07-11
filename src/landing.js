@@ -6,6 +6,30 @@ import {
 
 export const introTitle = 'THE GAME OF LIFE';
 
+const introPanelCopies = {
+  mode: {
+    title: 'Choose Mode',
+    primaryAction: 'Playground',
+    secondaryAction: 'Develop',
+    help: 'Play now, or create a builder card for Dev Studio.',
+    showProfileFields: false,
+  },
+  profile: {
+    title: 'Create Account',
+    primaryAction: 'Enter Dev',
+    secondaryAction: 'Back',
+    help: 'Dev Studio saves designs to your local player card.',
+    showProfileFields: true,
+  },
+  loading: {
+    title: 'Conway Arcade',
+    primaryAction: 'Loading',
+    secondaryAction: 'Develop',
+    help: 'Stand by.',
+    showProfileFields: false,
+  },
+};
+
 const LETTER_HEIGHT = 7;
 const LETTER_SPACING = 1;
 const WORD_SPACING = 3;
@@ -119,6 +143,15 @@ export function getIntroVisibleText(visibleCount) {
   return introTitle.slice(0, Math.max(0, Math.min(introTitle.length, visibleCount)));
 }
 
+export function getIntroPanelCopy(step = 'mode') {
+  return { ...(introPanelCopies[step] || introPanelCopies.mode) };
+}
+
+export function getIntroFlowStepAfterChoice(choice) {
+  if (choice === 'develop') return 'profile';
+  return 'complete';
+}
+
 export function createIntroBoard(text = introTitle) {
   const normalized = text.toUpperCase();
   const width = getTextWidth(normalized);
@@ -148,11 +181,25 @@ export function createIntroBoard(text = introTitle) {
   return board;
 }
 
+export function getIntroCompletionClasses() {
+  return {
+    add: ['intro-layer--complete'],
+    remove: ['intro-layer--ready', 'intro-layer--running'],
+  };
+}
+
 export function mountLandingIntro({
   layer,
   canvas,
   prompt,
   startButton,
+  skipButton = null,
+  title = null,
+  help = null,
+  profileFields = null,
+  onStart = () => {},
+  onPlayground = null,
+  onDevelop = null,
   onComplete = () => {},
   now = () => performance.now(),
   raf = (callback) => requestAnimationFrame(callback),
@@ -170,9 +217,20 @@ export function mountLandingIntro({
     lastTypeAt: 0,
     lastStepAt: 0,
     startedAt: 0,
+    step: 'loading',
     completed: false,
     destroyed: false,
   };
+
+  function setPanelStep(step) {
+    state.step = step;
+    const copy = getIntroPanelCopy(step);
+    if (title) title.textContent = copy.title;
+    if (prompt) prompt.textContent = copy.primaryAction;
+    if (skipButton) skipButton.textContent = copy.secondaryAction;
+    if (help) help.textContent = copy.help;
+    if (profileFields) profileFields.hidden = !copy.showProfileFields;
+  }
 
   function resize() {
     const pixelRatio = window.devicePixelRatio || 1;
@@ -183,28 +241,61 @@ export function mountLandingIntro({
     ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   }
 
-  function start() {
-    if (state.phase !== 'ready' || state.completed) return;
-
-    if (navigator.vibrate) navigator.vibrate(35);
-    state.phase = 'running';
-    state.board = createIntroBoard(introTitle);
-    state.startedAt = now();
-    state.lastStepAt = state.startedAt;
-    prompt.textContent = 'RUNNING LIFE';
-    if (startButton) startButton.disabled = true;
-    layer.classList.add('intro-layer--running');
-  }
-
-  function complete() {
+  function complete(mode) {
     if (state.completed) return;
 
     state.completed = true;
+    const transition = getIntroCompletionClasses([...layer.classList]);
+    layer.classList.remove(...transition.remove);
     layer.classList.add('intro-layer--complete');
-    onComplete();
+    onComplete(mode);
     window.setTimeout(() => {
       layer.hidden = true;
     }, 900);
+  }
+
+  async function choosePrimary() {
+    if (state.phase !== 'ready' || state.completed) return;
+
+    if (navigator.vibrate) navigator.vibrate(35);
+
+    if (state.step === 'profile') {
+      if (startButton) startButton.disabled = true;
+      try {
+        const canEnterDev = await onDevelop?.();
+        if (canEnterDev !== false) {
+          complete('dev');
+          return;
+        }
+      } finally {
+        if (!state.completed && startButton) startButton.disabled = false;
+      }
+      return;
+    }
+
+    onPlayground?.();
+    onStart();
+    complete('playground');
+  }
+
+  function chooseSecondary() {
+    if (state.completed) return;
+
+    if (state.phase !== 'ready') {
+      state.phase = 'ready';
+      setPanelStep('mode');
+      layer.classList.add('intro-layer--ready');
+      return;
+    }
+
+    if (state.step === 'profile') {
+      setPanelStep('mode');
+      return;
+    }
+
+    if (getIntroFlowStepAfterChoice('develop') === 'profile') {
+      setPanelStep('profile');
+    }
   }
 
   function tick(timestamp) {
@@ -219,7 +310,7 @@ export function mountLandingIntro({
 
       if (state.visibleCount >= introTitle.length) {
         state.phase = 'ready';
-        prompt.textContent = 'START';
+        setPanelStep('mode');
         if (startButton) startButton.disabled = false;
         layer.classList.add('intro-layer--ready');
       }
@@ -241,25 +332,32 @@ export function mountLandingIntro({
   function handleKeydown(event) {
     if (event.key === 'Enter') {
       event.preventDefault();
-      start();
+      choosePrimary();
     }
   }
 
+  function handleLayerClick(event) {
+    if (event.target === layer) choosePrimary();
+  }
+
+  setPanelStep('loading');
   resize();
   window.addEventListener('resize', resize);
   window.addEventListener('keydown', handleKeydown);
-  layer.addEventListener('click', start);
-  if (startButton) startButton.addEventListener('click', start);
+  layer.addEventListener('click', handleLayerClick);
+  if (startButton) startButton.addEventListener('click', choosePrimary);
+  if (skipButton) skipButton.addEventListener('click', chooseSecondary);
   raf(tick);
 
   return {
-    start,
+    start: choosePrimary,
     destroy() {
       state.destroyed = true;
       window.removeEventListener('resize', resize);
       window.removeEventListener('keydown', handleKeydown);
-      layer.removeEventListener('click', start);
-      if (startButton) startButton.removeEventListener('click', start);
+      layer.removeEventListener('click', handleLayerClick);
+      if (startButton) startButton.removeEventListener('click', choosePrimary);
+      if (skipButton) skipButton.removeEventListener('click', chooseSecondary);
     },
   };
 }
@@ -331,7 +429,9 @@ function drawBoard(ctx, board, width, height, phase) {
   const boardHeight = board.height * cellSize;
   const originX = Math.floor((width - boardWidth) / 2);
   const originY = Math.floor(height * 0.39 - boardHeight / 2);
-  const inset = Math.max(1, Math.floor(cellSize * 0.12));
+  const insetX = Math.max(1, Math.floor(cellSize * 0.08));
+  const segmentHeight = Math.max(2, Math.floor(cellSize * 0.46));
+  const insetY = Math.max(1, Math.floor((cellSize - segmentHeight) / 2));
 
   ctx.save();
   ctx.shadowBlur = phase === 'running' ? 18 : 11;
@@ -345,7 +445,7 @@ function drawBoard(ctx, board, width, height, phase) {
       const py = originY + y * cellSize;
       const shimmer = phase === 'running' && (x + y) % 3 === 0;
       ctx.fillStyle = shimmer ? '#e7fffb' : '#5eead4';
-      ctx.fillRect(px + inset, py + inset, cellSize - inset * 2, cellSize - inset * 2);
+      ctx.fillRect(px + insetX, py + insetY, cellSize - insetX * 2, segmentHeight);
     }
   }
 

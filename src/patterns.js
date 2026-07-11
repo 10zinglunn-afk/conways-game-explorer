@@ -33,6 +33,25 @@ export function normalizeCoordinates(coordinates) {
     .sort(([ax, ay], [bx, by]) => ay - by || ax - bx);
 }
 
+export function transformCoordinates(coordinates, { rotation = 0, flipX = false } = {}) {
+  const normalized = normalizeCoordinates(coordinates);
+  const bounds = getPatternBounds(normalized);
+  const quarterTurns = (((Math.round(rotation / 90) % 4) + 4) % 4);
+  let transformed = normalized.map(([x, y]) => {
+    if (quarterTurns === 1) return [bounds.height - 1 - y, x];
+    if (quarterTurns === 2) return [bounds.width - 1 - x, bounds.height - 1 - y];
+    if (quarterTurns === 3) return [y, bounds.width - 1 - x];
+    return [x, y];
+  });
+
+  if (flipX) {
+    const transformedBounds = getPatternBounds(transformed);
+    transformed = transformed.map(([x, y]) => [transformedBounds.maxX - x + transformedBounds.minX, y]);
+  }
+
+  return normalizeCoordinates(transformed);
+}
+
 export function getPresetGroup(groups, groupId) {
   return groups.find((group) => group.id === groupId) ?? null;
 }
