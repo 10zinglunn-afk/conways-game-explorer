@@ -5,7 +5,7 @@ A Conway's Game of Life playground growing into a community lab for learning log
 The current app is a large, zoomable finite toroidal world. The board wraps at the edges, so patterns can travel continuously while still fitting inside a practical browser canvas. It now has three modes:
 
 - **Playground**: draw cells, stamp presets, import/export RLE, and explore emergent behavior.
-- **Dev Lab**: treat gliders as signals, stamp logic components, and run lightweight claim checks.
+- **Dev Studio**: treat gliders as signals, stamp logic components, save immutable versions, and restore earlier snapshots as new versions.
 - **Community**: create a local profile, save board states, publish builds, star them, clone/remix them, and view a trending list.
 
 Community mode stays local-first by default. When Supabase runtime config is present, it adds magic-link sign-in, migrates local builds after sign-in, and gates publish/star/clone until the user is signed in.
@@ -43,13 +43,14 @@ The server injects those safe browser values into the inline `life-runtime-confi
 - Load curated presets with short explanations: still lifes, oscillators, gliders, growth seeds, Gosper glider gun, R-pentomino, Diehard, Acorn, and more.
 - Import and export Conway RLE patterns from the RLE panel.
 - Create a local community account, save the current board as a creation, publish it, copy a share payload, star builds, and clone/remix public experiments.
+- In Dev Studio, edit description, tags, attribution, and tutorial references; save immutable versions; restore history; and unpublish, archive, or delete a project.
 
 ## Community Roadmap
 
 The larger goal is a GitHub-like creative community for Game of Life machines:
 
 1. Stabilize the current Playground, Dev Lab, and local-first Community MVP.
-2. Keep hardening the Supabase Auth/Postgres-backed community path for creations, versions, stars, and remix lineage.
+2. Apply and live-test the authored durable-version migration once the linked Supabase project can be restored; local repository and browser coverage is complete.
 3. Move the app shell to Next.js while keeping the Life engine as pure reusable logic.
 4. Add public `/c/[slug]` and `/u/[username]` pages for SEO-indexable builds and profiles.
 5. Deploy through Vercel with GitHub preview deployments.

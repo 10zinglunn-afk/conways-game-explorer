@@ -2295,7 +2295,8 @@ input[type='range'] {
 }
 
 .dev-design-panel label,
-.dev-design-panel input {
+.dev-design-panel input,
+.dev-design-panel textarea {
   display: block;
   width: calc(100% - 26px);
   margin-right: 13px;
@@ -2315,6 +2316,73 @@ input[type='range'] {
   border: 1px solid var(--border);
   color: var(--text);
   background: rgba(3, 7, 18, 0.68);
+}
+
+.dev-design-panel textarea {
+  min-height: 72px;
+  padding: 8px 9px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: rgba(3, 7, 18, 0.68);
+  font: inherit;
+}
+
+.dev-lifecycle-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 8px;
+}
+
+.dev-lifecycle-actions button {
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+.dev-lifecycle-actions .danger {
+  border-color: rgba(248, 113, 113, 0.54);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.34);
+}
+
+.version-list {
+  display: grid;
+  gap: 7px;
+}
+
+.version-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.version-row.current {
+  border-color: rgba(94, 234, 212, 0.44);
+  background: rgba(20, 184, 166, 0.1);
+}
+
+.version-row span {
+  display: grid;
+  gap: 2px;
+}
+
+.version-row small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.version-row button {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+#dev-dirty-state.failed {
+  color: #fca5a5;
 }
 
 .stamp-controls {
@@ -2969,6 +3037,11 @@ input[type='range'] {
   .dev-mode .panel,
   .community-mode .panel {
     top: 68px;
+  }
+
+  .dev-active-mode .panel {
+    top: auto;
+    max-height: 38vh;
   }
 
   .dev-start-screen {

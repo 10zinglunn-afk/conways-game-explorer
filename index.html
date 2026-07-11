@@ -208,10 +208,28 @@
               <summary><h2>Design</h2><span id="dev-session-state">New</span></summary>
               <label for="dev-design-title">Name</label>
               <input id="dev-design-title" type="text" placeholder="Untitled design" />
+              <label for="dev-design-description">Description</label>
+              <textarea id="dev-design-description" rows="3" placeholder="What does this design teach or do?"></textarea>
+              <label for="dev-design-tags">Tags</label>
+              <input id="dev-design-tags" type="text" placeholder="glider, logic, oscillator" />
+              <label for="dev-design-attribution">Attribution</label>
+              <textarea id="dev-design-attribution" rows="2" placeholder="Credit a source or inspiration"></textarea>
+              <label for="dev-design-tutorial">Tutorial reference</label>
+              <input id="dev-design-tutorial" type="text" placeholder="Optional tutorial URL or identifier" />
               <div class="button-row">
                 <button id="save-design" type="button">Save Draft</button>
                 <button id="publish-design" type="button">Publish</button>
               </div>
+              <div class="button-row dev-lifecycle-actions">
+                <button id="unpublish-design" type="button">Unpublish</button>
+                <button id="archive-design" type="button">Archive</button>
+                <button id="delete-design" class="danger" type="button">Delete</button>
+              </div>
+            </details>
+
+            <details class="panel-section dev-version-panel collapsible-panel" open>
+              <summary><h2>Version History</h2><span id="dev-version-count">0</span></summary>
+              <div id="dev-version-list" class="version-list"></div>
             </details>
 
             <details class="panel-section dev-command-strip collapsible-panel" open>

@@ -56,6 +56,7 @@ import { getPresetStampSummary, presetGroups, presets } from './presets.js';
 
 const WORLD_WIDTH = 300;
 const WORLD_HEIGHT = 200;
+const LOCAL_RECOVERY_KEY = 'life-logic-dev-recovery-v1';
 const BASE_CELL_SIZE = 10;
 const MIN_ZOOM = 0.18;
 const MAX_ZOOM = 3.6;
@@ -136,7 +137,13 @@ const elements = {
   devCreateDesign: document.querySelector('#dev-create-design'),
   devCreateProject: document.querySelector('#dev-create-project'),
   devDesignTitle: document.querySelector('#dev-design-title'),
+  devDesignDescription: document.querySelector('#dev-design-description'),
+  devDesignTags: document.querySelector('#dev-design-tags'),
+  devDesignAttribution: document.querySelector('#dev-design-attribution'),
+  devDesignTutorial: document.querySelector('#dev-design-tutorial'),
   devSessionState: document.querySelector('#dev-session-state'),
+  devVersionCount: document.querySelector('#dev-version-count'),
+  devVersionList: document.querySelector('#dev-version-list'),
   devDesignCount: document.querySelector('#dev-design-count'),
   devDraftCount: document.querySelector('#dev-draft-count'),
   devPublishedCount: document.querySelector('#dev-published-count'),
@@ -159,6 +166,9 @@ const elements = {
   selectionColor: document.querySelector('#selection-color'),
   saveDesign: document.querySelector('#save-design'),
   publishDesign: document.querySelector('#publish-design'),
+  unpublishDesign: document.querySelector('#unpublish-design'),
+  archiveDesign: document.querySelector('#archive-design'),
+  deleteDesign: document.querySelector('#delete-design'),
   tutorialGroups: document.querySelector('#tutorial-groups'),
   tutorialList: document.querySelector('#tutorial-list'),
   tutorialCount: document.querySelector('#tutorial-count'),
@@ -221,6 +231,7 @@ const communityAuth = {
   unsubscribe: null,
 };
 let feedbackTimer = null;
+let recoveryTimer = null;
 
 const state = {
   board: createBoard(DEFAULT_DESIGN_SETTINGS.width, DEFAULT_DESIGN_SETTINGS.height),
@@ -242,6 +253,8 @@ const state = {
   activeDesignSession: null,
   designSettings: DEFAULT_DESIGN_SETTINGS,
   designDirty: false,
+  saveStatus: 'saved',
+  recoveryFailed: false,
   ageColors: true,
   panX: 0,
   panY: 0,
@@ -718,9 +731,100 @@ function replaceBoard(board, { center = false, markEffects = true } = {}) {
 
 function markDesignDirty(dirty = true) {
   state.designDirty = dirty;
+  setSaveStatus(dirty ? (navigator.onLine === false ? 'offline' : 'dirty') : 'saved');
+  if (dirty) scheduleLocalRecovery();
+}
+
+function setSaveStatus(status) {
+  const labels = {
+    dirty: 'Unsaved',
+    saving: 'Saving…',
+    saved: 'Saved',
+    failed: 'Save failed',
+    offline: 'Offline recovery',
+  };
+  state.saveStatus = status;
   if (elements.devDirtyState) {
-    elements.devDirtyState.textContent = dirty ? 'Unsaved' : 'Saved';
-    elements.devDirtyState.classList.toggle('dirty', dirty);
+    elements.devDirtyState.textContent = labels[status] || labels.saved;
+    elements.devDirtyState.classList.toggle('dirty', status === 'dirty' || status === 'offline');
+    elements.devDirtyState.classList.toggle('failed', status === 'failed');
+  }
+}
+
+function scheduleLocalRecovery() {
+  window.clearTimeout(recoveryTimer);
+  recoveryTimer = window.setTimeout(() => {
+    try {
+      const coordinates = getLiveCoordinates();
+      const recovery = {
+        creationId: state.activeDesignSession?.creationId || null,
+        title: state.activeDesignSession?.title || elements.devDesignTitle?.value || 'Untitled Design',
+        description: elements.devDesignDescription?.value || '',
+        tags: elements.devDesignTags?.value || '',
+        attribution: elements.devDesignAttribution?.value || '',
+        tutorialReference: elements.devDesignTutorial?.value || '',
+        rle: encodeRle(coordinates),
+        width: state.board.width,
+        height: state.board.height,
+        generation: state.board.generation,
+        population: coordinates.length,
+        settings: getCurrentDesignSettings(),
+        savedAt: new Date().toISOString(),
+      };
+      localStorage.setItem(LOCAL_RECOVERY_KEY, JSON.stringify(recovery));
+      state.recoveryFailed = false;
+    } catch {
+      state.recoveryFailed = true;
+      setSaveStatus('failed');
+    }
+  }, 500);
+}
+
+function clearLocalRecovery() {
+  window.clearTimeout(recoveryTimer);
+  recoveryTimer = null;
+  try {
+    localStorage.removeItem(LOCAL_RECOVERY_KEY);
+    state.recoveryFailed = false;
+  } catch {
+    // A completed repository save is still authoritative if local recovery cleanup fails.
+  }
+}
+
+function restoreLocalRecovery() {
+  try {
+    const raw = localStorage.getItem(LOCAL_RECOVERY_KEY);
+    if (!raw) return false;
+    const recovery = JSON.parse(raw);
+    const pattern = parseRle(recovery.rle);
+    const settings = createDesignSettings(recovery.settings || {
+      gridPreset: 'custom',
+      width: recovery.width,
+      height: recovery.height,
+    });
+    const board = placePattern(createBoard(recovery.width, recovery.height), pattern.coordinates, 0, 0);
+    board.generation = Number(recovery.generation || 0);
+    state.designSettings = settings;
+    replaceBoard(board, { center: true });
+    state.devProjectActive = true;
+    state.activeDesignSession = {
+      kind: 'editing',
+      creationId: recovery.creationId || null,
+      title: recovery.title || 'Recovered Design',
+      sourceTitle: '',
+      sourceOwnerName: communityState.profile?.displayName || 'Guest Builder',
+    };
+    setDesignMetadataFields({
+      title: recovery.title,
+      description: recovery.description,
+      tags: recovery.tags,
+      attribution: recovery.attribution,
+      tutorialReference: recovery.tutorialReference,
+    });
+    markDesignDirty(true);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -938,7 +1042,42 @@ function setDesignTitle(title) {
   }
 }
 
-function startDevProject(kind = 'design', { title = '', source = null, boardLoaded = false, openTools = false } = {}) {
+function setDesignMetadataFields({
+  title,
+  description = '',
+  tags = [],
+  attribution = '',
+  tutorialReference = '',
+} = {}) {
+  setDesignTitle(title);
+  const tagText = Array.isArray(tags) ? tags.join(', ') : String(tags || '');
+  if (elements.devDesignDescription && document.activeElement !== elements.devDesignDescription) {
+    elements.devDesignDescription.value = description || '';
+  }
+  if (elements.devDesignTags && document.activeElement !== elements.devDesignTags) {
+    elements.devDesignTags.value = tagText;
+  }
+  if (elements.devDesignAttribution && document.activeElement !== elements.devDesignAttribution) {
+    elements.devDesignAttribution.value = attribution || '';
+  }
+  if (elements.devDesignTutorial && document.activeElement !== elements.devDesignTutorial) {
+    elements.devDesignTutorial.value = tutorialReference || '';
+  }
+  if (elements.creationDescription && document.activeElement !== elements.creationDescription) {
+    elements.creationDescription.value = description || '';
+  }
+  if (elements.creationTags && document.activeElement !== elements.creationTags) {
+    elements.creationTags.value = tagText;
+  }
+}
+
+function startDevProject(kind = 'design', {
+  title = '',
+  creationId = null,
+  source = null,
+  boardLoaded = false,
+  openTools = false,
+} = {}) {
   const player = communityState.profile?.displayName || 'Guest Builder';
   const sessionTitle = title || (kind === 'project' ? 'Untitled Project' : 'Untitled Design');
   state.devProjectActive = true;
@@ -946,12 +1085,14 @@ function startDevProject(kind = 'design', { title = '', source = null, boardLoad
   state.activeDesignSession = source
     ? {
       kind: 'editing',
+      creationId,
       title: sessionTitle,
       sourceTitle: source.title,
       sourceOwnerName: source.ownerName,
     }
     : {
       kind: 'editing',
+      creationId,
       title: sessionTitle,
       sourceTitle: '',
       sourceOwnerName: player,
@@ -962,7 +1103,7 @@ function startDevProject(kind = 'design', { title = '', source = null, boardLoad
     markDesignDirty(false);
   }
 
-  setDesignTitle(sessionTitle);
+  setDesignMetadataFields({ title: sessionTitle, description: '', tags: [] });
   setMode('dev');
   syncToolDrawer();
   elements.activeNote.textContent = source
@@ -1843,51 +1984,154 @@ async function saveCurrentCreation({ publish = false } = {}) {
   }
 
   const coordinates = getLiveCoordinates();
+  const editingInDev = state.devProjectActive && state.activeDesignSession?.kind === 'editing';
+  const activeCreationId = editingInDev ? state.activeDesignSession?.creationId : null;
+  const title = editingInDev
+    ? elements.devDesignTitle.value
+    : elements.creationTitle.value;
+  const description = editingInDev
+    ? elements.devDesignDescription.value
+    : elements.creationDescription.value;
+  const tags = editingInDev ? elements.devDesignTags.value : elements.creationTags.value;
+  const input = {
+    title: title || getSuggestedCreationTitle(),
+    description,
+    tags,
+    attribution: editingInDev ? elements.devDesignAttribution.value : '',
+    tutorialReference: editingInDev ? elements.devDesignTutorial.value : '',
+    rle: encodeRle(coordinates),
+    width: state.board.width,
+    height: state.board.height,
+    generation: state.board.generation,
+    population: coordinates.length,
+    thumbnail: captureBoardThumbnail(),
+    settings: getCurrentDesignSettings(),
+  };
   let creation;
+  setSaveStatus('saving');
   try {
-    creation = await community.saveCreation({
-      title: elements.creationTitle.value || getSuggestedCreationTitle(),
-      description: elements.creationDescription.value,
-      tags: elements.creationTags.value,
-      rle: encodeRle(coordinates),
-      width: state.board.width,
-      height: state.board.height,
-      generation: state.board.generation,
-      population: coordinates.length,
-      thumbnail: captureBoardThumbnail(),
-      settings: getCurrentDesignSettings(),
-    }, { publish });
+    if (activeCreationId) {
+      creation = await community.updateCreationMetadata(activeCreationId, input);
+      if (state.designDirty) creation = await community.saveVersion(activeCreationId, input);
+      if (publish) creation = await community.publishCreation(activeCreationId);
+    } else {
+      creation = await community.createCreation(input, { publish });
+    }
   } catch (error) {
+    setSaveStatus(navigator.onLine === false ? 'offline' : 'failed');
     elements.communityOutput.textContent = error.name === 'QuotaExceededError'
       ? 'Could not save: browser storage is full. Remove some builds and try again.'
       : `Could not save: ${getErrorMessage(error)}`;
     return null;
   }
 
+  if (!creation) {
+    setSaveStatus('failed');
+    return null;
+  }
+
+  if (editingInDev) {
+    state.activeDesignSession.creationId = creation.id;
+    state.activeDesignSession.title = creation.title;
+  }
+  setDesignMetadataFields(creation);
   syncCommunity();
   markDesignDirty(false);
+  clearLocalRecovery();
   triggerHaptic('save');
   showToast(publish ? 'Published to Community' : 'Draft saved', { kind: 'success' });
   elements.communityOutput.textContent = publish
     ? `Published ${creation.title}. It now appears in Trending.`
-    : `Saved ${creation.title} as a private draft.`;
+    : `Saved ${creation.title} as version ${creation.currentVersion?.versionNumber || 1}.`;
   elements.devOutput.textContent = publish
     ? `Published ${creation.title} to Community.`
-    : `Saved ${creation.title} as a draft.`;
+    : `Saved version ${creation.currentVersion?.versionNumber || 1} of ${creation.title}.`;
 
   return creation;
 }
 
 function hasPublishMetadata() {
+  const editingInDev = state.devProjectActive && state.activeDesignSession?.kind === 'editing';
   return Boolean(
-    elements.creationTitle.value.trim()
-      && elements.creationDescription.value.trim()
-      && elements.creationTags.value.trim(),
+    (editingInDev ? elements.devDesignTitle.value : elements.creationTitle.value).trim()
+      && (editingInDev ? elements.devDesignDescription.value : elements.creationDescription.value).trim()
+      && (editingInDev ? elements.devDesignTags.value : elements.creationTags.value).trim(),
   );
 }
 
 async function publishActiveCreation() {
   await saveCurrentCreation({ publish: true });
+}
+
+async function unpublishActiveCreation() {
+  const creationId = state.activeDesignSession?.creationId;
+  if (!creationId) return;
+  setSaveStatus('saving');
+  try {
+    const creation = await community.unpublishCreation(creationId);
+    if (!creation) return;
+    syncCommunity();
+    setSaveStatus('saved');
+    elements.devOutput.textContent = `${creation.title} is now private.`;
+    showToast('Design unpublished', { kind: 'success' });
+  } catch (error) {
+    setSaveStatus('failed');
+    elements.devOutput.textContent = `Could not unpublish: ${getErrorMessage(error)}`;
+  }
+}
+
+async function archiveActiveCreation() {
+  const creationId = state.activeDesignSession?.creationId;
+  if (!creationId || !window.confirm('Archive this design? It will become private and leave the active project list.')) return;
+  try {
+    const creation = await community.archiveCreation(creationId);
+    if (!creation) return;
+    state.devProjectActive = false;
+    state.activeDesignSession = null;
+    clearLocalRecovery();
+    syncCommunity();
+    setMode('dev');
+    showToast('Design archived', { kind: 'success' });
+  } catch (error) {
+    setSaveStatus('failed');
+    elements.devOutput.textContent = `Could not archive: ${getErrorMessage(error)}`;
+  }
+}
+
+async function deleteActiveCreation() {
+  const creationId = state.activeDesignSession?.creationId;
+  if (!creationId || !window.confirm('Permanently delete this design and every version? This cannot be undone.')) return;
+  try {
+    const deleted = await community.deleteCreation(creationId);
+    if (!deleted) return;
+    state.devProjectActive = false;
+    state.activeDesignSession = null;
+    clearLocalRecovery();
+    syncCommunity();
+    setMode('dev');
+    showToast('Design deleted', { kind: 'success' });
+  } catch (error) {
+    setSaveStatus('failed');
+    elements.devOutput.textContent = `Could not delete: ${getErrorMessage(error)}`;
+  }
+}
+
+async function restoreActiveVersion(versionId) {
+  const creationId = state.activeDesignSession?.creationId;
+  if (!creationId) return;
+  setSaveStatus('saving');
+  try {
+    const creation = await community.restoreVersion(creationId, versionId);
+    if (!creation) return;
+    loadCreationOntoBoard(creation, { center: true });
+    syncCommunity();
+    setSaveStatus('saved');
+    elements.devOutput.textContent = `Restored version as new version ${creation.currentVersion.versionNumber}.`;
+    showToast('Version restored', { kind: 'success' });
+  } catch (error) {
+    setSaveStatus('failed');
+    elements.devOutput.textContent = `Could not restore version: ${getErrorMessage(error)}`;
+  }
 }
 
 async function copySharePayload() {
@@ -2099,8 +2343,8 @@ function renderDevStudio() {
 
   const profile = communityState.profile;
   const creations = profile
-    ? communityState.creations.filter((creation) => creation.ownerId === profile.id)
-    : communityState.creations;
+    ? communityState.creations.filter((creation) => creation.ownerId === profile.id && !creation.archivedAt)
+    : communityState.creations.filter((creation) => !creation.archivedAt);
   const published = creations.filter((creation) => creation.visibility === 'public');
   const drafts = creations.filter((creation) => creation.visibility !== 'public');
   const starredCount = communityState.creations.filter((creation) => creation.starredBy?.includes(profile?.id)).length;
@@ -2118,12 +2362,47 @@ function renderDevStudio() {
   if (elements.devDesignTitle && document.activeElement !== elements.devDesignTitle) {
     elements.devDesignTitle.value = state.activeDesignSession?.title || elements.creationTitle?.value || 'Untitled design';
   }
+  const activeCreation = state.activeDesignSession?.creationId
+    ? community.findCreation(state.activeDesignSession.creationId)
+    : null;
+  if (activeCreation) setDesignMetadataFields(activeCreation);
   if (elements.devSessionState) {
-    elements.devSessionState.textContent = state.activeDesignSession?.sourceTitle ? 'Clone' : 'New';
+    elements.devSessionState.textContent = activeCreation
+      ? `Version ${activeCreation.currentVersion?.versionNumber || 1}`
+      : state.activeDesignSession?.sourceTitle ? 'Clone' : 'New';
   }
+  if (elements.saveDesign) elements.saveDesign.textContent = activeCreation ? 'Save Version' : 'Save Draft';
+  if (elements.unpublishDesign) elements.unpublishDesign.disabled = activeCreation?.visibility !== 'public';
+  if (elements.archiveDesign) elements.archiveDesign.disabled = !activeCreation;
+  if (elements.deleteDesign) elements.deleteDesign.disabled = !activeCreation;
+  renderVersionHistory(activeCreation);
   renderProjectList(creations);
   renderTutorials();
   syncDesignControls();
+}
+
+function renderVersionHistory(creation) {
+  if (!elements.devVersionList || !elements.devVersionCount) return;
+  const versions = [...(creation?.versions || (creation?.currentVersion ? [creation.currentVersion] : []))]
+    .sort((left, right) => Number(right.versionNumber || 0) - Number(left.versionNumber || 0));
+  elements.devVersionCount.textContent = String(versions.length);
+  elements.devVersionList.innerHTML = '';
+
+  if (versions.length === 0) {
+    elements.devVersionList.innerHTML = '<p class="community-empty">Save the draft to create version 1.</p>';
+    return;
+  }
+
+  for (const version of versions) {
+    const row = document.createElement('div');
+    const current = version.id === creation.currentVersion?.id;
+    row.className = `version-row${current ? ' current' : ''}`;
+    row.innerHTML = `
+      <span><strong>Version ${version.versionNumber || 1}</strong><small>${current ? 'Current' : `${version.population || 0} cells`}</small></span>
+      <button type="button" data-restore-version-id="${escapeHtml(version.id)}" ${current ? 'disabled' : ''}>Restore</button>
+    `;
+    elements.devVersionList.append(row);
+  }
 }
 
 function renderProjectList(creations) {
@@ -2533,10 +2812,12 @@ async function editCommunityClone(creationId) {
     state.selectedCommunityId = creationId;
     startDevProject('design', {
       title: copy.title,
+      creationId: community.findCreation(copy.id) ? copy.id : null,
       source,
       boardLoaded: true,
       openTools: true,
     });
+    setDesignMetadataFields(copy);
     elements.communityOutput.textContent = communityState.profile
       ? `Created ${copy.title} in your portfolio.`
       : `Opened a guest copy of ${source.title}. Create a profile to save it.`;
@@ -2826,10 +3107,12 @@ function openDevProject(creationId) {
   loadCommunityCreation(creationId);
   startDevProject('design', {
     title: creation.title,
+    creationId: creation.id,
     source: creation.remixedFromId ? findCommunityDesign(creation.remixedFromId) : null,
     boardLoaded: true,
     openTools: true,
   });
+  setDesignMetadataFields(creation);
 }
 
 function loadTutorial(tutorial) {
@@ -2978,6 +3261,16 @@ function bindEvents() {
     markDesignDirty(true);
     elements.activeNote.textContent = `Renamed draft to ${elements.devDesignTitle.value || 'Untitled design'}.`;
   });
+  elements.devDesignDescription?.addEventListener('input', () => {
+    elements.creationDescription.value = elements.devDesignDescription.value;
+    markDesignDirty(true);
+  });
+  elements.devDesignTags?.addEventListener('input', () => {
+    elements.creationTags.value = elements.devDesignTags.value;
+    markDesignDirty(true);
+  });
+  elements.devDesignAttribution?.addEventListener('input', () => markDesignDirty(true));
+  elements.devDesignTutorial?.addEventListener('input', () => markDesignDirty(true));
 
   elements.stampRotateLeft?.addEventListener('click', () => rotateStamp(-90));
   elements.stampRotateRight?.addEventListener('click', () => rotateStamp(90));
@@ -3032,6 +3325,13 @@ function bindEvents() {
   elements.saveDesign.addEventListener('click', () => saveCurrentCreation());
 
   elements.publishDesign.addEventListener('click', () => publishActiveCreation());
+  elements.unpublishDesign?.addEventListener('click', unpublishActiveCreation);
+  elements.archiveDesign?.addEventListener('click', archiveActiveCreation);
+  elements.deleteDesign?.addEventListener('click', deleteActiveCreation);
+  elements.devVersionList?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-restore-version-id]');
+    if (button && !button.disabled) restoreActiveVersion(button.dataset.restoreVersionId);
+  });
 
   elements.copySharePayload.addEventListener('click', () => {
     copySharePayload();
@@ -3191,6 +3491,17 @@ function bindEvents() {
     if (event.key === '1') chooseTool('draw');
     if (event.key === '2') chooseTool('stamp');
   });
+  window.addEventListener('offline', () => {
+    if (state.designDirty) setSaveStatus('offline');
+  });
+  window.addEventListener('online', () => {
+    if (state.designDirty) setSaveStatus('dirty');
+  });
+  window.addEventListener('beforeunload', (event) => {
+    if (!state.designDirty || !state.recoveryFailed) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
 }
 
 function loop(timestamp) {
@@ -3227,6 +3538,7 @@ function boot() {
   bindEvents();
   clearWorld();
   markDesignDirty(false);
+  const recoveredDraft = restoreLocalRecovery();
   importSharedBuildFromHash();
   initializeCommunityBackend();
   mountLandingIntro({
@@ -3239,6 +3551,11 @@ function boot() {
     help: elements.introHelp,
     profileFields: elements.introProfileFields,
     onPlayground: () => {
+      if (recoveredDraft && !window.location.hash) {
+        setMode('dev');
+        elements.devOutput.textContent = 'Recovered your unsaved local draft. Save it when you are ready.';
+        return;
+      }
       setMode('playground');
       window.setTimeout(openPlaygroundIntro, 940);
     },

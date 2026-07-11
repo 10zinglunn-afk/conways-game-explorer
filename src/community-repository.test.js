@@ -164,29 +164,36 @@ test('migrateLocalState copies local profile and creations to cloud before clear
     githubUrl: '',
     linkedinUrl: '',
   });
-  assert.deepEqual(cloudRepo.operations[1].input, {
-    title: 'Public Glider',
-    description: 'Shared with everyone',
-    tags: ['glider', 'public'],
-    rle: 'x = 1, y = 1, rule = B3/S23\no!',
-    width: 1,
-    height: 1,
-    generation: 8,
-    population: 1,
-    thumbnail: '',
-  });
+  assert.deepEqual(
+    pickCreationMigrationFields(cloudRepo.operations[1].input),
+    {
+      title: 'Public Glider',
+      description: 'Shared with everyone',
+      tags: ['glider', 'public'],
+      rle: 'x = 1, y = 1, rule = B3/S23\no!',
+      width: 1,
+      height: 1,
+      generation: 8,
+      population: 1,
+      thumbnail: '',
+    },
+  );
+  assert.equal(cloudRepo.operations[1].input.settings.rule, 'B3/S23');
   assert.equal(cloudRepo.operations[2].creationId, 'cloud-creation-1');
-  assert.deepEqual(cloudRepo.operations[3].input, {
-    title: 'Private Oscillator',
-    description: 'Kept as a draft',
-    tags: ['oscillator', 'private'],
-    rle: 'x = 1, y = 1, rule = B3/S23\no!',
-    width: 1,
-    height: 1,
-    generation: 5,
-    population: 1,
-    thumbnail: '',
-  });
+  assert.deepEqual(
+    pickCreationMigrationFields(cloudRepo.operations[3].input),
+    {
+      title: 'Private Oscillator',
+      description: 'Kept as a draft',
+      tags: ['oscillator', 'private'],
+      rle: 'x = 1, y = 1, rule = B3/S23\no!',
+      width: 1,
+      height: 1,
+      generation: 5,
+      population: 1,
+      thumbnail: '',
+    },
+  );
   assert.deepEqual(result.creationMap, {
     [publicBuild.id]: 'cloud-creation-1',
     [draft.id]: 'cloud-creation-2',
@@ -268,5 +275,19 @@ function createRecordingCloudRepo({ failOnCreation = null } = {}) {
       operations.push({ action: 'publishCreation', creationId });
       return { id: creationId, visibility: 'public', publishedAt: FIXED_NOW() };
     },
+  };
+}
+
+function pickCreationMigrationFields(input) {
+  return {
+    title: input.title,
+    description: input.description,
+    tags: input.tags,
+    rle: input.rle,
+    width: input.width,
+    height: input.height,
+    generation: input.generation,
+    population: input.population,
+    thumbnail: input.thumbnail,
   };
 }

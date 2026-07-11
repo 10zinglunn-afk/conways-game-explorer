@@ -36,6 +36,82 @@ export function runCommunityRepositoryContract(label, makeRepo) {
     assert.equal(repo.findCreation(draft.id).id, draft.id);
   });
 
+  test(`[${label}] createCreation and saveVersion keep one project with immutable snapshots`, async () => {
+    const repo = await withProfile();
+    const creation = await repo.createCreation({ title: 'Versioned', rle: SAMPLE_RLE });
+    const updated = await repo.saveVersion(creation.id, {
+      rle: 'x = 2, y = 1, rule = B3/S23\n2o!',
+      width: 120,
+      height: 80,
+      population: 2,
+      settings: { gridPreset: 'small', speed: 17, wrapping: false },
+    });
+    const versions = await repo.listVersions(creation.id);
+
+    assert.equal(updated.id, creation.id);
+    assert.equal(repo.getState().creations.length, 1);
+    assert.equal(updated.currentVersion.versionNumber, 2);
+    assert.equal(updated.currentVersion.parentVersionId, creation.currentVersion.id);
+    assert.equal(updated.currentVersion.settings.speed, 17);
+    assert.equal(updated.currentVersion.settings.wrapping, false);
+    assert.deepEqual(versions.map((version) => version.versionNumber), [2, 1]);
+    assert.equal((await repo.loadVersion(creation.id, creation.currentVersion.id)).rle, SAMPLE_RLE);
+  });
+
+  test(`[${label}] updateCreationMetadata edits mutable project fields without replacing versions`, async () => {
+    const repo = await withProfile();
+    const creation = await repo.createCreation({ title: 'Metadata', rle: SAMPLE_RLE });
+    const updated = await repo.updateCreationMetadata(creation.id, {
+      title: 'Metadata Updated',
+      description: 'A durable description.',
+      tags: ['logic', 'clock'],
+      attribution: 'Based on a public-domain pattern.',
+      tutorialReference: 'tutorial-glider-clock',
+      previewConfig: { alt: 'A two-cell preview' },
+      publishReadiness: { metadata: true },
+    });
+
+    assert.equal(updated.title, 'Metadata Updated');
+    assert.deepEqual(updated.tags, ['logic', 'clock']);
+    assert.equal(updated.attribution, 'Based on a public-domain pattern.');
+    assert.equal(updated.currentVersion.id, creation.currentVersion.id);
+    assert.equal((await repo.listVersions(creation.id)).length, 1);
+  });
+
+  test(`[${label}] restoreVersion appends a new snapshot instead of mutating history`, async () => {
+    const repo = await withProfile();
+    const creation = await repo.createCreation({ title: 'Restore', rle: SAMPLE_RLE });
+    await repo.saveVersion(creation.id, {
+      rle: 'x = 2, y = 1, rule = B3/S23\n2o!',
+      width: 120,
+      height: 80,
+      population: 2,
+      settings: { gridPreset: 'small' },
+    });
+    const restored = await repo.restoreVersion(creation.id, creation.currentVersion.id);
+    const versions = await repo.listVersions(creation.id);
+
+    assert.equal(restored.currentVersion.rle, SAMPLE_RLE);
+    assert.equal(restored.currentVersion.versionNumber, 3);
+    assert.equal(restored.currentVersion.parentVersionId, creation.currentVersion.id);
+    assert.deepEqual(versions.map((version) => version.versionNumber), [3, 2, 1]);
+  });
+
+  test(`[${label}] unpublish, archive, and delete enforce the project lifecycle`, async () => {
+    const repo = await withProfile();
+    const creation = await repo.createCreation({ title: 'Lifecycle', rle: SAMPLE_RLE }, { publish: true });
+    const unpublished = await repo.unpublishCreation(creation.id);
+    const archived = await repo.archiveCreation(creation.id);
+
+    assert.equal(unpublished.visibility, 'private');
+    assert.equal(unpublished.publishedAt, null);
+    assert.ok(archived.archivedAt);
+    assert.equal(await repo.saveVersion(creation.id, { rle: SAMPLE_RLE }), null);
+    assert.equal(await repo.deleteCreation(creation.id), true);
+    assert.equal(repo.findCreation(creation.id), null);
+    assert.equal(await repo.deleteCreation(creation.id), false);
+  });
+
   test(`[${label}] saveCreation persists design settings metadata`, async () => {
     const repo = await withProfile();
     const draft = await repo.saveCreation({

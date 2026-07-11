@@ -10,13 +10,20 @@ import {
   COMMUNITY_STORAGE_KEY,
   createCommunityState,
   createCreationDraft,
+  createCreationVersion,
   createProfile,
   getTrendingCreations,
   incrementCloneCount,
+  appendCreationVersion,
+  archiveCreation as applyArchive,
+  getCreationVersions,
   replaceCreation,
+  restoreCreationVersion as applyRestoreVersion,
   loadCommunityState as readStoredState,
   saveCommunityState as writeStoredState,
   publishCreation as applyPublish,
+  unpublishCreation as applyUnpublish,
+  updateCreationMetadata as applyMetadataUpdate,
   toggleStar as applyStarToggle,
   cloneCreation as buildRemix,
 } from './community.js';
@@ -113,7 +120,12 @@ export function createSupabaseCommunityRepository({
     return data;
   };
 
-  const hydrateCreation = async (row, { version = null, ownerName = null, starredBy = null } = {}) => {
+  const hydrateCreation = async (row, {
+    version = null,
+    versions = null,
+    ownerName = null,
+    starredBy = null,
+  } = {}) => {
     const cached = find(row.id);
     const versionRow = version || cached?.currentVersion || await loadVersionRow(row.current_version_id);
     const resolvedOwnerName = ownerName
@@ -124,6 +136,7 @@ export function createSupabaseCommunityRepository({
       version: versionRow,
       ownerName: resolvedOwnerName,
       starredBy: starredBy || cached?.starredBy || [],
+      versions: versions || cached?.versions || null,
     });
   };
 
@@ -140,6 +153,37 @@ export function createSupabaseCommunityRepository({
   const loadCurrentUserStarIds = async (userId) => {
     const rows = await selectRowsBy('stars', 'profile_id', userId);
     return new Set(rows.map((row) => row.creation_id).filter(Boolean));
+  };
+  const createCreation = async (input, { publish = false } = {}) => {
+    if (!state.profile) {
+      throw new Error('Create a Supabase profile before saving creations.');
+    }
+
+    const draft = createCreationDraft({
+      ...input,
+      id: createId(),
+      profile: state.profile,
+      now,
+    });
+    const creationInput = publish ? applyPublish(draft, { now }) : draft;
+    const version = { ...creationInput.currentVersion, id: createId(), versionNumber: 1 };
+    const { data, error } = await client.rpc(
+      'create_creation',
+      toCreateCreationRpcPayload(creationInput, version),
+    );
+    assertSupabaseOk(error);
+
+    const creation = await hydrateCreation(data, {
+      version,
+      versions: [version],
+      ownerName: state.profile.displayName,
+    });
+    state = {
+      ...state,
+      creations: replaceCreation(state.creations, creation),
+      activeCreationId: creation.id,
+    };
+    return creation;
   };
 
   return {
@@ -200,10 +244,18 @@ export function createSupabaseCommunityRepository({
       const profile = fromProfileRow(profileRow, user.email);
       const starredCreationIds = await loadCurrentUserStarIds(user.id);
       const creationRows = await selectRowsBy('creations', 'owner_id', user.id);
-      const creations = await Promise.all(creationRows.map((row) => hydrateCreation(row, {
-        ownerName: profile.displayName,
-        starredBy: starredCreationIds.has(row.id) ? [user.id] : [],
-      })));
+      const creations = await Promise.all(creationRows.map(async (row) => {
+        const versionRows = await selectRowsBy('creation_versions', 'creation_id', row.id);
+        const versions = versionRows.map(fromVersionRow).sort(
+          (left, right) => left.versionNumber - right.versionNumber,
+        );
+        return hydrateCreation(row, {
+          version: versions.find((version) => version.id === row.current_version_id),
+          versions,
+          ownerName: profile.displayName,
+          starredBy: starredCreationIds.has(row.id) ? [user.id] : [],
+        });
+      }));
 
       state = createCommunityState({
         profile,
@@ -234,30 +286,86 @@ export function createSupabaseCommunityRepository({
       return profile;
     },
 
-    async saveCreation(input, { publish = false } = {}) {
-      if (!state.profile) {
-        throw new Error('Create a Supabase profile before saving creations.');
-      }
+    createCreation,
+    saveCreation: createCreation,
 
-      const draft = createCreationDraft({
-        ...input,
-        id: createId(),
-        profile: state.profile,
-        now,
+    async saveVersion(creationId, input) {
+      const existing = find(creationId);
+      if (!existing || existing.archivedAt) return null;
+      const version = createCreationVersion(existing, input, { id: createId(), now });
+      const { data, error } = await client.rpc('save_creation_version', {
+        target_creation_id: creationId,
+        new_version_id: version.id,
+        version_rle: version.rle,
+        version_width: version.width,
+        version_height: version.height,
+        version_generation: version.generation,
+        version_population: version.population,
+        version_rule: version.rule,
+        version_settings: version.settings,
+        requested_parent_version_id: version.parentVersionId,
       });
-      const creationInput = publish ? applyPublish(draft, { now }) : draft;
-
-      const version = { ...creationInput.currentVersion, id: createId() };
-      const { data, error } = await client.rpc(
-        'save_creation',
-        toSaveCreationRpcPayload(creationInput, version),
-      );
       assertSupabaseOk(error);
-
-      const hydrated = await hydrateCreation(data, {
-        ownerName: state.profile.displayName,
+      const creation = await hydrateCreation(data, {
+        version,
+        versions: [...getCreationVersions(existing), version],
       });
-      const creation = withVersionSettings(hydrated, version.settings);
+      state = {
+        ...state,
+        creations: replaceCreation(state.creations, creation),
+        activeCreationId: creation.id,
+      };
+      return creation;
+    },
+
+    async updateCreationMetadata(creationId, patch) {
+      const existing = find(creationId);
+      if (!existing) return null;
+      const next = applyMetadataUpdate(existing, patch, { now });
+      const { data, error } = await client
+        .from('creations')
+        .update(toCreationMetadataRow(next))
+        .eq('id', creationId)
+        .select()
+        .single();
+      assertSupabaseOk(error);
+      const creation = await hydrateCreation(data);
+      state = { ...state, creations: replaceCreation(state.creations, creation) };
+      return creation;
+    },
+
+    async listVersions(creationId) {
+      const rows = await selectRowsBy('creation_versions', 'creation_id', creationId);
+      return rows.map(fromVersionRow).sort((left, right) => right.versionNumber - left.versionNumber);
+    },
+
+    async loadVersion(creationId, versionId) {
+      const { data, error } = await client
+        .from('creation_versions')
+        .select()
+        .eq('id', versionId)
+        .maybeSingle();
+      assertSupabaseOk(error);
+      if (!data || data.creation_id !== creationId) return null;
+      return fromVersionRow(data);
+    },
+
+    async restoreVersion(creationId, versionId) {
+      const existing = find(creationId);
+      if (!existing || existing.archivedAt) return null;
+      const newVersionId = createId();
+      const { data, error } = await client.rpc('restore_creation_version', {
+        target_creation_id: creationId,
+        source_version_id: versionId,
+        new_version_id: newVersionId,
+      });
+      assertSupabaseOk(error);
+      const restoredRow = await loadVersionRow(newVersionId);
+      const version = fromVersionRow(restoredRow);
+      const creation = await hydrateCreation(data, {
+        version,
+        versions: [...getCreationVersions(existing), version],
+      });
       state = {
         ...state,
         creations: replaceCreation(state.creations, creation),
@@ -294,6 +402,59 @@ export function createSupabaseCommunityRepository({
         activeCreationId: creation.id,
       };
       return creation;
+    },
+
+    async unpublishCreation(creationId) {
+      const existing = find(creationId);
+      if (!existing) return null;
+      const updatedAt = now();
+      const { data, error } = await client
+        .from('creations')
+        .update({ visibility: 'private', published_at: null, updated_at: updatedAt })
+        .eq('id', creationId)
+        .select()
+        .single();
+      assertSupabaseOk(error);
+      const creation = await hydrateCreation(data);
+      state = { ...state, creations: replaceCreation(state.creations, creation) };
+      return creation;
+    },
+
+    async archiveCreation(creationId) {
+      const existing = find(creationId);
+      if (!existing) return null;
+      const archivedAt = now();
+      const { data, error } = await client
+        .from('creations')
+        .update({
+          visibility: 'private',
+          published_at: null,
+          archived_at: archivedAt,
+          updated_at: archivedAt,
+        })
+        .eq('id', creationId)
+        .select()
+        .single();
+      assertSupabaseOk(error);
+      const creation = await hydrateCreation(data);
+      state = {
+        ...state,
+        creations: replaceCreation(state.creations, creation),
+        activeCreationId: state.activeCreationId === creationId ? null : state.activeCreationId,
+      };
+      return creation;
+    },
+
+    async deleteCreation(creationId) {
+      if (!find(creationId)) return false;
+      const { error } = await client.from('creations').delete().eq('id', creationId);
+      assertSupabaseOk(error);
+      state = {
+        ...state,
+        creations: state.creations.filter((creation) => creation.id !== creationId),
+        activeCreationId: state.activeCreationId === creationId ? null : state.activeCreationId,
+      };
+      return true;
     },
 
     async toggleStar(creationId) {
@@ -448,12 +609,17 @@ function toCreationInput(creation) {
     title: creation.title,
     description: creation.description || '',
     tags: creation.tags || [],
+    attribution: creation.attribution || '',
+    tutorialReference: creation.tutorialReference || '',
+    previewConfig: creation.previewConfig || {},
+    publishReadiness: creation.publishReadiness || {},
     rle: version.rle,
     width: version.width,
     height: version.height,
     generation: version.generation,
     population: version.population,
     thumbnail: creation.thumbnail || '',
+    settings: version.settings || null,
   };
 }
 
@@ -484,13 +650,17 @@ function fromProfileRow(row, email = '') {
   };
 }
 
-function toSaveCreationRpcPayload(creation, version) {
+function toCreateCreationRpcPayload(creation, version) {
   return {
     creation_id: creation.id,
     creation_slug: creation.slug,
     creation_title: creation.title,
     creation_description: creation.description,
     creation_tags: creation.tags,
+    creation_attribution: creation.attribution || '',
+    creation_tutorial_reference: creation.tutorialReference || '',
+    creation_preview_config: creation.previewConfig || {},
+    creation_publish_readiness: creation.publishReadiness || {},
     creation_visibility: creation.visibility,
     creation_published_at: creation.publishedAt,
     version_id: version.id,
@@ -500,15 +670,39 @@ function toSaveCreationRpcPayload(creation, version) {
     version_generation: version.generation,
     version_population: version.population,
     version_rule: version.rule,
+    version_settings: version.settings,
   };
 }
 
-function fromCreationRow(row, { version = null, ownerName = 'Community Builder', starredBy = [] } = {}) {
+function toCreationMetadataRow(creation) {
+  return {
+    title: creation.title,
+    description: creation.description,
+    tags: creation.tags,
+    attribution: creation.attribution || '',
+    tutorial_reference: creation.tutorialReference || '',
+    preview_config: creation.previewConfig || {},
+    publish_readiness: creation.publishReadiness || {},
+    updated_at: creation.updatedAt,
+  };
+}
+
+function fromCreationRow(row, {
+  version = null,
+  versions = null,
+  ownerName = 'Community Builder',
+  starredBy = [],
+} = {}) {
+  const currentVersion = fromVersionRow(version);
   return {
     id: row.id,
     title: row.title,
     slug: row.slug,
     description: row.description || '',
+    attribution: row.attribution || '',
+    tutorialReference: row.tutorial_reference || '',
+    previewConfig: row.preview_config || {},
+    publishReadiness: row.publish_readiness || {},
     visibility: row.visibility,
     ownerId: row.owner_id,
     ownerName,
@@ -520,23 +714,29 @@ function fromCreationRow(row, { version = null, ownerName = 'Community Builder',
     starredBy,
     remixedFromId: row.remixed_from_id || null,
     rootCreationId: row.root_creation_id || row.id,
-    currentVersion: fromVersionRow(version),
+    currentVersion,
+    versions: versions || (currentVersion.id ? [currentVersion] : []),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     publishedAt: row.published_at || null,
+    archivedAt: row.archived_at || null,
   };
 }
 
 function fromVersionRow(row) {
   return {
     id: row?.id || null,
+    creationId: row?.creation_id || row?.creationId || null,
+    versionNumber: Number(row?.version_number || row?.versionNumber || 1),
     rle: row?.rle || 'x = 0, y = 0, rule = B3/S23\n!',
     width: Number(row?.width || 0),
     height: Number(row?.height || 0),
     generation: Number(row?.generation || 0),
     population: Number(row?.population || 0),
     rule: row?.rule || 'B3/S23',
-    createdAt: row?.created_at,
+    settings: row?.settings || null,
+    parentVersionId: row?.parent_version_id || row?.parentVersionId || null,
+    createdAt: row?.created_at || row?.createdAt,
   };
 }
 
@@ -566,6 +766,17 @@ export function createLocalCommunityRepository({
   const persist = () => writeStoredState(state, storage, key);
   const find = (creationId) =>
     state.creations.find((creation) => creation.id === creationId) || null;
+  const createCreation = async (input, { publish = false } = {}) => {
+    const draft = createCreationDraft({ ...input, profile: state.profile, now });
+    const creation = publish ? applyPublish(draft, { now }) : draft;
+    state = {
+      ...state,
+      creations: replaceCreation(state.creations, creation),
+      activeCreationId: creation.id,
+    };
+    persist();
+    return creation;
+  };
 
   return {
     backend: 'local',
@@ -609,9 +820,47 @@ export function createLocalCommunityRepository({
       return profile;
     },
 
-    async saveCreation(input, { publish = false } = {}) {
-      const draft = createCreationDraft({ ...input, profile: state.profile, now });
-      const creation = publish ? applyPublish(draft, { now }) : draft;
+    createCreation,
+    saveCreation: createCreation,
+
+    async saveVersion(creationId, input) {
+      const target = find(creationId);
+      if (!target || target.archivedAt) return null;
+      const creation = appendCreationVersion(target, input, { now });
+      state = {
+        ...state,
+        creations: replaceCreation(state.creations, creation),
+        activeCreationId: creation.id,
+      };
+      persist();
+      return creation;
+    },
+
+    async updateCreationMetadata(creationId, patch) {
+      const target = find(creationId);
+      if (!target) return null;
+      const creation = applyMetadataUpdate(target, patch, { now });
+      state = { ...state, creations: replaceCreation(state.creations, creation) };
+      persist();
+      return creation;
+    },
+
+    async listVersions(creationId) {
+      const target = find(creationId);
+      return target ? getCreationVersions(target).slice().reverse() : [];
+    },
+
+    async loadVersion(creationId, versionId) {
+      const target = find(creationId);
+      const versions = target ? getCreationVersions(target) : [];
+      return versions.find((version) => version.id === versionId) || null;
+    },
+
+    async restoreVersion(creationId, versionId) {
+      const target = find(creationId);
+      if (!target || target.archivedAt) return null;
+      const creation = applyRestoreVersion(target, versionId, { now });
+      if (!creation) return null;
       state = {
         ...state,
         creations: replaceCreation(state.creations, creation),
@@ -633,6 +882,40 @@ export function createLocalCommunityRepository({
       };
       persist();
       return published;
+    },
+
+    async unpublishCreation(creationId) {
+      const target = find(creationId);
+      if (!target) return null;
+      const creation = applyUnpublish(target, { now });
+      state = { ...state, creations: replaceCreation(state.creations, creation) };
+      persist();
+      return creation;
+    },
+
+    async archiveCreation(creationId) {
+      const target = find(creationId);
+      if (!target) return null;
+      const creation = applyArchive(target, { now });
+      state = {
+        ...state,
+        creations: replaceCreation(state.creations, creation),
+        activeCreationId: state.activeCreationId === creationId ? null : state.activeCreationId,
+      };
+      persist();
+      return creation;
+    },
+
+    async deleteCreation(creationId) {
+      const existed = Boolean(find(creationId));
+      if (!existed) return false;
+      state = {
+        ...state,
+        creations: state.creations.filter((creation) => creation.id !== creationId),
+        activeCreationId: state.activeCreationId === creationId ? null : state.activeCreationId,
+      };
+      persist();
+      return true;
     },
 
     async toggleStar(creationId, profileId) {

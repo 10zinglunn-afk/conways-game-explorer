@@ -44,6 +44,19 @@ test('createSupabaseCommunityRepository exposes the repository contract methods'
   assert.equal(typeof repo.getState, 'function');
   assert.equal(typeof repo.findCreation, 'function');
   assert.equal(typeof repo.setActiveCreation, 'function');
+  for (const method of [
+    'createCreation',
+    'saveVersion',
+    'updateCreationMetadata',
+    'listVersions',
+    'loadVersion',
+    'restoreVersion',
+    'unpublishCreation',
+    'archiveCreation',
+    'deleteCreation',
+  ]) {
+    assert.equal(typeof repo[method], 'function', `${method} is part of the repository contract`);
+  }
 });
 
 test('createSupabaseCommunityRepository wraps Supabase auth helpers', async () => {
@@ -113,7 +126,7 @@ test('saveProfile upserts a profile using the authenticated Supabase user id', a
   ]);
 });
 
-test('saveCreation calls an atomic save_creation RPC and hydrates the saved version', async () => {
+test('saveCreation calls the atomic create_creation RPC and hydrates replay settings', async () => {
   const client = createRecordingClient({
     user: { id: '00000000-0000-4000-8000-0000000000a1', email: 'ada@example.com' },
     profileRow: {
@@ -153,32 +166,13 @@ test('saveCreation calls an atomic save_creation RPC and hydrates the saved vers
   assert.equal(creation.currentVersion.id, '20000000-0000-4000-8000-000000000001');
   assert.equal(repo.getState().activeCreationId, creation.id);
   assert.equal(repo.findCreation(creation.id).title, 'Glider Clock');
-  assert.deepEqual(client.operations.slice(1), [
-    {
-      action: 'rpc',
-      functionName: 'save_creation',
-      payload: {
-        creation_id: '10000000-0000-4000-8000-000000000001',
-        creation_slug: 'glider-clock-000000000001',
-        creation_title: 'Glider Clock',
-        creation_description: 'A tiny oscillator',
-        creation_tags: ['glider', 'clock'],
-        creation_visibility: 'private',
-        creation_published_at: null,
-        version_id: '20000000-0000-4000-8000-000000000001',
-        version_rle: 'x = 1, y = 1, rule = B3/S23\no!',
-        version_width: 1,
-        version_height: 1,
-        version_generation: 8,
-        version_population: 1,
-        version_rule: 'B3/S23',
-      },
-    },
-    {
-      table: 'creation_versions',
-      action: 'select',
-    },
-  ]);
+  const operation = client.operations.at(1);
+  assert.equal(operation.functionName, 'create_creation');
+  assert.equal(operation.payload.creation_id, creation.id);
+  assert.equal(operation.payload.version_id, creation.currentVersion.id);
+  assert.deepEqual(operation.payload.creation_tags, ['glider', 'clock']);
+  assert.equal(operation.payload.version_settings.rule, 'B3/S23');
+  assert.deepEqual(operation.payload.version_settings.camera, { x: 0, y: 0 });
 });
 
 test('publishCreation marks a Supabase creation public and updates the cache', async () => {
@@ -493,6 +487,18 @@ function createRecordingClient({ user, profileRow }) {
               }
               return { data: null, error: null };
             },
+            eq(column, value) {
+              operations.push({ table, action: 'delete', eq: [column, value] });
+              if (column === 'id') {
+                rows[table]?.delete(value);
+                if (table === 'creations') {
+                  for (const [id, version] of rows.creation_versions) {
+                    if (version.creation_id === value) rows.creation_versions.delete(id);
+                  }
+                }
+              }
+              return { data: null, error: null };
+            },
           };
         },
         select() {
@@ -568,7 +574,7 @@ function createRecordingClient({ user, profileRow }) {
     },
     async rpc(functionName, payload) {
       operations.push({ action: 'rpc', functionName, payload });
-      if (functionName === 'save_creation') {
+      if (functionName === 'create_creation') {
         const creation = {
           id: payload.creation_id,
           owner_id: user.id,
@@ -576,6 +582,10 @@ function createRecordingClient({ user, profileRow }) {
           title: payload.creation_title,
           description: payload.creation_description,
           tags: payload.creation_tags,
+          attribution: payload.creation_attribution,
+          tutorial_reference: payload.creation_tutorial_reference,
+          preview_config: payload.creation_preview_config,
+          publish_readiness: payload.creation_publish_readiness,
           visibility: payload.creation_visibility,
           remixed_from_id: null,
           root_creation_id: payload.creation_id,
@@ -586,22 +596,67 @@ function createRecordingClient({ user, profileRow }) {
           created_at: '2026-06-29T12:00:00.000Z',
           updated_at: '2026-06-29T12:00:00.000Z',
           published_at: payload.creation_published_at,
+          archived_at: null,
         };
         rows.creations.set(creation.id, creation);
         rows.creation_versions.set(payload.version_id, {
           id: payload.version_id,
           creation_id: creation.id,
+          version_number: 1,
           rle: payload.version_rle,
           width: payload.version_width,
           height: payload.version_height,
           generation: payload.version_generation,
           population: payload.version_population,
           rule: payload.version_rule,
+          settings: payload.version_settings,
           parent_version_id: null,
           created_at: '2026-06-29T12:00:00.000Z',
         });
 
         return { data: creation, error: null };
+      }
+
+      if (functionName === 'save_creation_version') {
+        const creation = rows.creations.get(payload.target_creation_id);
+        const versions = [...rows.creation_versions.values()]
+          .filter((version) => version.creation_id === creation.id);
+        const version = {
+          id: payload.new_version_id,
+          creation_id: creation.id,
+          version_number: Math.max(0, ...versions.map((item) => item.version_number || 0)) + 1,
+          rle: payload.version_rle,
+          width: payload.version_width,
+          height: payload.version_height,
+          generation: payload.version_generation,
+          population: payload.version_population,
+          rule: payload.version_rule,
+          settings: payload.version_settings,
+          parent_version_id: payload.requested_parent_version_id || creation.current_version_id,
+          created_at: '2026-06-29T12:00:00.000Z',
+        };
+        rows.creation_versions.set(version.id, version);
+        const updated = { ...creation, current_version_id: version.id, updated_at: version.created_at };
+        rows.creations.set(updated.id, updated);
+        return { data: updated, error: null };
+      }
+
+      if (functionName === 'restore_creation_version') {
+        const source = rows.creation_versions.get(payload.source_version_id);
+        const creation = rows.creations.get(payload.target_creation_id);
+        const versions = [...rows.creation_versions.values()]
+          .filter((version) => version.creation_id === creation.id);
+        const version = {
+          ...source,
+          id: payload.new_version_id,
+          version_number: Math.max(0, ...versions.map((item) => item.version_number || 0)) + 1,
+          parent_version_id: source.id,
+          created_at: '2026-06-29T12:00:00.000Z',
+        };
+        rows.creation_versions.set(version.id, version);
+        const updated = { ...creation, current_version_id: version.id, updated_at: version.created_at };
+        rows.creations.set(updated.id, updated);
+        return { data: updated, error: null };
       }
 
       if (functionName !== 'clone_creation') return { data: null, error: { message: 'Unknown RPC' } };
@@ -615,6 +670,10 @@ function createRecordingClient({ user, profileRow }) {
         title: payload.new_title,
         description: source.description,
         tags: source.tags,
+        attribution: source.attribution || '',
+        tutorial_reference: source.tutorial_reference || '',
+        preview_config: source.preview_config || {},
+        publish_readiness: source.publish_readiness || {},
         visibility: 'private',
         remixed_from_id: source.id,
         root_creation_id: source.root_creation_id || source.id,
@@ -625,12 +684,15 @@ function createRecordingClient({ user, profileRow }) {
         created_at: '2026-06-29T12:00:00.000Z',
         updated_at: '2026-06-29T12:00:00.000Z',
         published_at: null,
+        archived_at: null,
       };
       rows.creations.set(remix.id, remix);
       rows.creation_versions.set(remix.current_version_id, {
         ...sourceVersion,
         id: remix.current_version_id,
         creation_id: remix.id,
+        version_number: 1,
+        parent_version_id: sourceVersion.id,
       });
       rows.creations.set(source.id, { ...source, clone_count: Number(source.clone_count || 0) + 1 });
 

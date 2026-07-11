@@ -82,6 +82,53 @@ test('Dev Studio launches a project without losing the current board and exposes
   await expect(page.locator('#dev-design-title')).toHaveValue('Browser smoke design');
 });
 
+test('Dev Studio saves immutable versions and restores history as a new version', async ({ page }) => {
+  await enterPlayground(page);
+  await page.locator('#mode-dev').click();
+  await page.locator('#profile-name').fill('Version Builder');
+  await page.locator('#profile-email').fill('versions@example.com');
+  await page.locator('#save-profile').click();
+  await expect(page.locator('#dev-profile-name')).toHaveText('Version Builder');
+
+  await page.locator('#dev-create-design').click();
+  await page.locator('#tool-drawer-toggle').click();
+  await page.locator('#dev-design-title').fill('Versioned browser design');
+  await page.locator('#dev-design-description').fill('A browser-tested version history.');
+  await page.locator('#dev-design-tags').fill('browser, history');
+  await clickBoard(page, 0.46, 0.4);
+  await page.locator('#save-design').click();
+  await expect(page.locator('#dev-version-count')).toHaveText('1');
+  await expect(page.locator('#dev-dirty-state')).toHaveText('Saved');
+
+  await clickBoard(page, 0.56, 0.46);
+  await page.locator('#save-design').click();
+  await expect(page.locator('#dev-version-count')).toHaveText('2');
+  await expect(page.locator('.version-row.current')).toContainText('Version 2');
+
+  await page.locator('.version-row').filter({ hasText: 'Version 1' }).getByRole('button', { name: 'Restore' }).click();
+  await expect(page.locator('#dev-version-count')).toHaveText('3');
+  await expect(page.locator('.version-row.current')).toContainText('Version 3');
+});
+
+test('Dev Studio recovers a debounced unsaved draft after reload', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chromium', 'Recovery is storage behavior covered once in Chromium.');
+  await enterPlayground(page);
+  await page.locator('#mode-dev').click();
+  await page.locator('#dev-create-design').click();
+  await page.locator('#tool-drawer-toggle').click();
+  await page.locator('#dev-design-title').fill('Recovered browser draft');
+  await clickBoard(page, 0.48, 0.42);
+  await page.waitForTimeout(700);
+
+  await page.reload();
+  await expect(page.locator('#intro-start')).toBeEnabled();
+  await page.locator('#intro-start').click();
+  await expect(page.locator('#intro-layer')).toBeHidden({ timeout: 3_000 });
+  await expect(page.locator('.app-shell')).toHaveClass(/dev-active-mode/);
+  await expect(page.locator('#dev-design-title')).toHaveValue('Recovered browser draft');
+  await expect(page.locator('#dev-dirty-state')).toHaveText('Unsaved');
+});
+
 test('Community renders discovery controls and explicitly gates shared actions', async ({ page }) => {
   await enterPlayground(page);
   await page.locator('#mode-community').click();

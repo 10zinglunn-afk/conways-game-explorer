@@ -54,6 +54,10 @@ export function createCreationDraft({
   thumbnail = '',
   parentCreation = null,
   settings = null,
+  attribution = '',
+  tutorialReference = '',
+  previewConfig = {},
+  publishReadiness = {},
   comments = [],
   now = () => new Date().toISOString(),
 } = {}) {
@@ -73,11 +77,29 @@ export function createCreationDraft({
   const versionSettings = serializeDesignSettings(createDesignSettings(designInput));
   const normalizedComments = normalizeComments(comments);
 
+  const currentVersion = {
+    id: `version-${getIdSuffix(creationId)}`,
+    versionNumber: 1,
+    rle: String(rle || 'x = 0, y = 0, rule = B3/S23\n!'),
+    width: Number(width || 0),
+    height: Number(height || 0),
+    generation: Number(generation || 0),
+    population: Number(population || 0),
+    rule: 'B3/S23',
+    settings: versionSettings,
+    parentVersionId: null,
+    createdAt,
+  };
+
   return {
     id: creationId,
     title: cleanTitle,
     slug: `${slugify(cleanTitle) || 'life-build'}-${getIdSuffix(creationId)}`,
     description: String(description || '').trim(),
+    attribution: String(attribution || '').trim(),
+    tutorialReference: String(tutorialReference || '').trim(),
+    previewConfig: normalizeObject(previewConfig),
+    publishReadiness: normalizeObject(publishReadiness),
     visibility: 'private',
     ownerId: profile?.id || 'profile-local',
     ownerName: profile?.displayName || 'Local Builder',
@@ -91,21 +113,106 @@ export function createCreationDraft({
     starredBy: [],
     remixedFromId: parentCreation?.id || null,
     rootCreationId: parentCreation?.rootCreationId || parentCreation?.id || creationId,
-    currentVersion: {
-      id: `version-${getIdSuffix(creationId)}`,
-      rle: String(rle || 'x = 0, y = 0, rule = B3/S23\n!'),
-      width: Number(width || 0),
-      height: Number(height || 0),
-      generation: Number(generation || 0),
-      population: Number(population || 0),
-      rule: 'B3/S23',
-      settings: versionSettings,
-      createdAt,
-    },
+    currentVersion,
+    versions: [currentVersion],
     createdAt,
     updatedAt: createdAt,
     publishedAt: null,
+    archivedAt: null,
   };
+}
+
+export function createCreationVersion(creation, input = {}, {
+  id,
+  parentVersionId = creation?.currentVersion?.id || null,
+  now = () => new Date().toISOString(),
+} = {}) {
+  if (!creation?.id) throw new Error('A creation is required to save a version.');
+  const createdAt = now();
+  const existingVersions = getCreationVersions(creation);
+  const versionNumber = existingVersions.reduce(
+    (highest, version) => Math.max(highest, Number(version.versionNumber || 0)),
+    0,
+  ) + 1;
+  const settings = serializeDesignSettings(createDesignSettings({
+    ...(creation.currentVersion?.settings || {}),
+    ...(input.settings || {}),
+    width: input.width ?? input.settings?.width ?? creation.currentVersion?.width,
+    height: input.height ?? input.settings?.height ?? creation.currentVersion?.height,
+  }));
+
+  return {
+    id: id || `version-${hashString(`${creation.id}:${versionNumber}:${input.rle}:${createdAt}`)}`,
+    versionNumber,
+    rle: String(input.rle || creation.currentVersion?.rle || 'x = 0, y = 0, rule = B3/S23\n!'),
+    width: Number(input.width ?? settings.width),
+    height: Number(input.height ?? settings.height),
+    generation: Number(input.generation ?? 0),
+    population: Number(input.population ?? 0),
+    rule: String(input.rule || settings.rule || 'B3/S23'),
+    settings,
+    parentVersionId,
+    createdAt,
+  };
+}
+
+export function appendCreationVersion(creation, input, options = {}) {
+  const version = createCreationVersion(creation, input, options);
+  return {
+    ...creation,
+    currentVersion: version,
+    versions: [...getCreationVersions(creation), version],
+    updatedAt: version.createdAt,
+  };
+}
+
+export function updateCreationMetadata(creation, patch = {}, { now = () => new Date().toISOString() } = {}) {
+  return {
+    ...creation,
+    ...(patch.title === undefined ? {} : { title: String(patch.title || '').trim() }),
+    ...(patch.description === undefined ? {} : { description: String(patch.description || '').trim() }),
+    ...(patch.tags === undefined ? {} : { tags: normalizeTags(patch.tags) }),
+    ...(patch.attribution === undefined ? {} : { attribution: String(patch.attribution || '').trim() }),
+    ...(patch.tutorialReference === undefined ? {} : { tutorialReference: String(patch.tutorialReference || '').trim() }),
+    ...(patch.previewConfig === undefined ? {} : { previewConfig: normalizeObject(patch.previewConfig) }),
+    ...(patch.publishReadiness === undefined ? {} : { publishReadiness: normalizeObject(patch.publishReadiness) }),
+    updatedAt: now(),
+  };
+}
+
+export function restoreCreationVersion(creation, versionId, options = {}) {
+  const source = getCreationVersions(creation).find((version) => version.id === versionId);
+  if (!source) return null;
+  return appendCreationVersion(creation, source, {
+    ...options,
+    parentVersionId: source.id,
+  });
+}
+
+export function archiveCreation(creation, { now = () => new Date().toISOString() } = {}) {
+  const archivedAt = now();
+  return {
+    ...creation,
+    visibility: 'private',
+    publishedAt: null,
+    archivedAt,
+    updatedAt: archivedAt,
+  };
+}
+
+export function getCreationVersions(creation) {
+  const versions = Array.isArray(creation?.versions) ? creation.versions : [];
+  const withCurrent = creation?.currentVersion
+    && !versions.some((version) => version.id === creation.currentVersion.id)
+    ? [...versions, creation.currentVersion]
+    : versions;
+  return withCurrent
+    .map((version, index) => ({
+      ...version,
+      versionNumber: Number(version.versionNumber || index + 1),
+      parentVersionId: version.parentVersionId || null,
+    }))
+    .sort((left, right) => left.versionNumber - right.versionNumber);
 }
 
 export function publishCreation(creation, { now = () => new Date().toISOString() } = {}) {
@@ -157,6 +264,10 @@ export function cloneCreation(source, {
     title: createRemixTitle({ sourceTitle: source.title, profile }),
     description: source.description,
     tags: source.tags,
+    attribution: source.attribution,
+    tutorialReference: source.tutorialReference,
+    previewConfig: source.previewConfig,
+    publishReadiness: source.publishReadiness,
     rle: source.currentVersion?.rle,
     width: source.currentVersion?.width,
     height: source.currentVersion?.height,
@@ -224,7 +335,7 @@ export function loadCommunityState(storage = window.localStorage, key = COMMUNIT
     const parsed = JSON.parse(raw);
     return createCommunityState({
       profile: parsed.profile || null,
-      creations: Array.isArray(parsed.creations) ? parsed.creations : [],
+      creations: Array.isArray(parsed.creations) ? parsed.creations.map(normalizeCreation) : [],
       activeCreationId: parsed.activeCreationId || null,
     });
   } catch {
@@ -289,6 +400,27 @@ function normalizeComments(comments) {
       createdAt: String(comment.createdAt || new Date().toISOString()),
     }))
     .filter((comment) => comment.body);
+}
+
+function normalizeCreation(creation) {
+  const versions = getCreationVersions(creation);
+  const currentVersion = versions.find((version) => version.id === creation.currentVersion?.id)
+    || versions.at(-1)
+    || creation.currentVersion;
+  return {
+    attribution: '',
+    tutorialReference: '',
+    previewConfig: {},
+    publishReadiness: {},
+    archivedAt: null,
+    ...creation,
+    currentVersion,
+    versions,
+  };
+}
+
+function normalizeObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
 }
 
 function getIdSuffix(id) {

@@ -38,3 +38,8 @@ Execution priorities:
   Playwright coverage for Playground, Dev Studio, Community, and mobile layouts.
 - Playwright browser tests live in `tests/browser` and run with
   `npm run test:e2e`.
+- Phase 1's durable creation/version repository, Dev Studio history, lifecycle
+  controls, metadata editing, and local crash recovery are implemented and pass
+  local Node/browser coverage. The authored Supabase migration is pending hosted
+  application because the linked free project is paused and the organization is
+  currently at its active-project limit.

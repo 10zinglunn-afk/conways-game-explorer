@@ -4,7 +4,7 @@ create extension if not exists pgtap with schema extensions;
 create temp table community_tap (line text);
 grant insert, select on table community_tap to anon, authenticated;
 
-insert into community_tap select plan(19);
+insert into community_tap select plan(27);
 
 insert into auth.users (id, email)
 values
@@ -137,6 +137,78 @@ insert into community_tap select results_eq(
   'save_creation writes the version payload'
 );
 
+insert into community_tap select lives_ok(
+  $$select public.create_creation(
+      'cccccccc-cccc-4ccc-8ccc-ccccccccccc3'::uuid,
+      'durable-versioned-build',
+      'Durable Versioned Build',
+      'Version metadata survives reload',
+      array['durable', 'versioned'],
+      'Public domain',
+      'tutorial-durable',
+      '{"alt":"Two live cells"}'::jsonb,
+      '{"metadata":true}'::jsonb,
+      'private',
+      null,
+      'dddddddd-dddd-4ddd-8ddd-ddddddddddd3'::uuid,
+      'x = 1, y = 1, rule = B3/S23\no!',
+      120,
+      80,
+      0,
+      1,
+      'B3/S23',
+      '{"gridPreset":"small","width":120,"height":80,"wrapping":false,"speed":17,"zoom":1,"backgroundColor":"#07090f","gridColor":"#334155","liveCellColor":"#5eead4","trailCellColor":"#38bdf8","accentColor":"#2dd4bf","selectionColor":"#fbbf24","renderStyle":"glow","trailIntensity":"high","rule":"B3/S23","camera":{"x":4,"y":8}}'::jsonb
+    )$$,
+  'create_creation atomically creates durable metadata and version 1'
+);
+
+insert into community_tap select results_eq(
+  $$select version_number, settings ->> 'renderStyle', settings -> 'camera' ->> 'x'
+      from public.creation_versions
+     where id = 'dddddddd-dddd-4ddd-8ddd-ddddddddddd3'::uuid$$,
+  $$values (1, 'glow'::text, '4'::text)$$,
+  'structured replay settings are stored on the immutable version'
+);
+
+insert into community_tap select lives_ok(
+  $$select public.save_creation_version(
+      'cccccccc-cccc-4ccc-8ccc-ccccccccccc3'::uuid,
+      'dddddddd-dddd-4ddd-8ddd-ddddddddddd4'::uuid,
+      'x = 2, y = 1, rule = B3/S23\n2o!',
+      120, 80, 1, 2, 'B3/S23',
+      '{"gridPreset":"small","width":120,"height":80,"wrapping":false,"speed":17,"zoom":1,"backgroundColor":"#07090f","gridColor":"#334155","liveCellColor":"#5eead4","trailCellColor":"#38bdf8","accentColor":"#2dd4bf","selectionColor":"#fbbf24","renderStyle":"glow","trailIntensity":"high","rule":"B3/S23","camera":{"x":4,"y":8}}'::jsonb,
+      'dddddddd-dddd-4ddd-8ddd-ddddddddddd3'::uuid
+    )$$,
+  'save_creation_version appends an immutable snapshot and advances current_version_id'
+);
+
+insert into community_tap select results_eq(
+  $$select c.current_version_id, count(v.id)::bigint
+      from public.creations c
+      join public.creation_versions v on v.creation_id = c.id
+     where c.id = 'cccccccc-cccc-4ccc-8ccc-ccccccccccc3'::uuid
+     group by c.current_version_id$$,
+  $$values ('dddddddd-dddd-4ddd-8ddd-ddddddddddd4'::uuid, 2::bigint)$$,
+  'version append keeps one creation and two snapshots'
+);
+
+insert into community_tap select lives_ok(
+  $$select public.restore_creation_version(
+      'cccccccc-cccc-4ccc-8ccc-ccccccccccc3'::uuid,
+      'dddddddd-dddd-4ddd-8ddd-ddddddddddd3'::uuid,
+      'dddddddd-dddd-4ddd-8ddd-ddddddddddd5'::uuid
+    )$$,
+  'restore_creation_version restores by creating a third snapshot'
+);
+
+insert into community_tap select results_eq(
+  $$select version_number, rle, parent_version_id
+      from public.creation_versions
+     where id = 'dddddddd-dddd-4ddd-8ddd-ddddddddddd5'::uuid$$,
+  $$values (3, E'x = 1, y = 1, rule = B3/S23\no!'::text, 'dddddddd-dddd-4ddd-8ddd-ddddddddddd3'::uuid)$$,
+  'restored snapshot preserves source payload and records its parent'
+);
+
 set local "request.jwt.claim.sub" = '';
 
 insert into community_tap select throws_ok(
@@ -175,6 +247,32 @@ insert into community_tap select is_empty(
     where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'::uuid
     returning id$$,
   'non-owner cannot update another profile creation'
+);
+
+insert into community_tap select throws_ok(
+  $$select public.save_creation_version(
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'::uuid,
+      'dddddddd-dddd-4ddd-8ddd-ddddddddddd6'::uuid,
+      'x = 1, y = 1, rule = B3/S23\no!',
+      1, 1, 0, 1, 'B3/S23',
+      '{"gridPreset":"custom","width":40,"height":40,"wrapping":true,"speed":10,"zoom":1,"backgroundColor":"#07090f","gridColor":"#334155","liveCellColor":"#5eead4","trailCellColor":"#38bdf8","accentColor":"#2dd4bf","selectionColor":"#fbbf24","renderStyle":"square","trailIntensity":"medium","rule":"B3/S23","camera":{"x":0,"y":0}}'::jsonb,
+      null
+    )$$,
+  'P0001',
+  'creation not found',
+  'non-owner cannot append a version to another profile creation'
+);
+
+insert into community_tap select throws_ok(
+  $$insert into public.creation_versions (
+      creation_id, rle, width, height, generation, population, rule
+    ) values (
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'::uuid,
+      'x = 1, y = 1, rule = B3/S23\no!', 1, 1, 0, 1, 'B3/S23'
+    )$$,
+  '42501',
+  'new row violates row-level security policy for table "creation_versions"',
+  'non-owner cannot directly insert a version for another profile creation'
 );
 
 set local "request.jwt.claim.sub" = '11111111-1111-4111-8111-111111111111';

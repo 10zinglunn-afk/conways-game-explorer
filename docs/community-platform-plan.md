@@ -10,9 +10,10 @@
 | Shared contract test suite | Done (`src/community-repository.contract.js`) |
 | URL share links + import-on-load | Done |
 | Supabase project | Done: `conway-life-community` (`wfkzhsdjzgnmurkgsjvd`, `us-east-1`) |
-| Supabase schema / RLS / functions | Done on the linked project: migration history is repaired, all local migrations through `20260630214126_harden_rpc_security_definer_exposure.sql` are recorded remotely, public RPCs no longer run as `SECURITY DEFINER`, and `save_creation` is deployed with the intended authenticated/service-role grant surface. |
-| RLS + counter-function tests | Linked-project pgTAP coverage passes for RLS/counters/clone/trending plus `save_creation` (19/19 via `supabase db query --linked --file supabase/tests/community_rls_counters.test.sql`). Local Docker remains unavailable, so local Supabase runner coverage is still pending. |
-| Supabase repository implementation | Done: shared contract runs against the Supabase repository fake client, and the opt-in live contract passed 8/8 against the linked hosted project on 2026-06-30 using a server-only service-role test-user setup. Profile, atomic `save_creation`, publish, star/unstar, clone RPC, trending, auth helpers, runtime config, migration, and returning-user hydration are covered. |
+| Supabase schema / RLS / functions | Existing hosted migrations through `20260630214126_harden_rpc_security_definer_exposure.sql` are deployed. Phase 1 durable metadata/version RPCs are authored in `20260711165603_durable_creation_versions.sql`, but hosted application is blocked because the linked project is paused and the free organization is at its active-project limit. |
+| RLS + counter-function tests | The existing linked-project suite previously passed 19/19. The suite now contains 27 checks covering atomic creation/version/restore and cross-owner version writes; hosted execution is pending project restoration. Local Docker is unavailable. |
+| Supabase repository implementation | The shared contract covers create/update/version/restore/unpublish/archive/delete parity for local and Supabase repositories. The fake-client suite passes; the expanded live contract is pending restoration of the linked hosted project. |
+| Durable Dev Studio workflow | Implemented locally: existing projects append immutable versions, restore creates a new version, metadata/lifecycle actions are available, and debounced crash recovery preserves unsaved board settings. |
 | Browser auth UI + shared-action gating | Done: magic-link controls, sign-out fallback to local mode, local-to-cloud migration on sign-in, and publish/star/clone gating |
 | Next.js migration + public SSR pages | Not started (Phase 3) |
 
