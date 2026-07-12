@@ -27,12 +27,12 @@ test('Better Auth fails clearly when a database is configured without a secret',
   );
 });
 
-test('PostgreSQL pool resolves Better Auth tables from the auth schema', async () => {
+test('PostgreSQL pool uses standard connection options for hosted Postgres', async () => {
   const pool = createPostgresPool({
     env: { DATABASE_URL: 'postgres://example.invalid/life' },
   });
 
-  assert.equal(pool.options.options, '-c search_path=auth,public');
+  assert.equal(pool.options.options, undefined);
   await pool.end();
 });
 

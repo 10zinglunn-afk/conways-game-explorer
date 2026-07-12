@@ -5,3 +5,6 @@ playwright-report/
 .next/
 worker-assets/
 .wrangler/
+.env
+.env.*
+!.env.example

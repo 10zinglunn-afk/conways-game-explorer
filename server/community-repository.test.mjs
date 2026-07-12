@@ -37,7 +37,7 @@ function createRecordingPool() {
     queries,
     async query(text, values = []) {
       queries.push({ text, values });
-      if (/from auth\.auth_users/.test(text)) {
+      if (/from public\.auth_users/.test(text)) {
         return { rows: [{ id: 'user-1', email: 'ada@example.com', name: 'Ada Lovelace', image: null }] };
       }
       if (/insert into public\.profiles/.test(text)) {

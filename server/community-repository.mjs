@@ -135,7 +135,7 @@ export function createPostgresCommunityRepository({
       const client = await pool.connect();
       try {
         const profileResult = await client.query(
-          'select p.*, u.email from public.profiles p join auth.auth_users u on u.id = p.id where p.id = $1',
+          'select p.*, u.email from public.profiles p join public.auth_users u on u.id = p.id where p.id = $1',
           [userId],
         );
         const profile = profileResult.rows[0] ? fromProfileRow(profileResult.rows[0]) : null;
@@ -162,7 +162,7 @@ export function createPostgresCommunityRepository({
 
     async saveProfile(input) {
       const userResult = await pool.query(
-        'select id, email, name, image from auth.auth_users where id = $1',
+        'select id, email, name, image from public.auth_users where id = $1',
         [userId],
       );
       if (!userResult.rows[0]) throw new Error('Authenticated Better Auth user was not found.');

@@ -7,23 +7,26 @@ caches connections to it.
 
 ## First-time setup
 
-1. Create a PostgreSQL database (Neon is a good starter choice) and apply the
-   existing migration with `DATABASE_URL=... npm run db:migrate`.
+1. Create a PostgreSQL database (Neon is a good starter choice), copy its
+   direct (non-pooled) connection string, and apply the existing migration
+   with `DATABASE_URL=... npm run db:migrate`.
 2. Authenticate the local CLI with `npx wrangler login`.
 3. Create Hyperdrive using the database connection string:
 
    ```bash
-   npx wrangler hyperdrive create conways-postgres --connection-string="$DATABASE_URL"
+   npx wrangler hyperdrive create conways-postgres --connection-string="$DATABASE_URL" --caching-disabled
    ```
 
 4. Copy the returned Hyperdrive ID into the `hyperdrive` binding shown in
    [postgres/README.md](../postgres/README.md).
-5. Create the Worker secrets. Do not put these in `wrangler.jsonc`:
+5. Create the required Worker secret. Do not put it in `wrangler.jsonc`:
 
    ```bash
    npx wrangler secret put BETTER_AUTH_SECRET
-   npx wrangler secret put BETTER_AUTH_API_KEY
    ```
+
+   `BETTER_AUTH_API_KEY` is optional and only needed when enabling Better Auth
+   Infrastructure Dash features.
 
 6. Deploy:
 

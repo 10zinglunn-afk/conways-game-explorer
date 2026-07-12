@@ -16,10 +16,9 @@ export function createPostgresPool({ env = process.env } = {}) {
     connectionString,
     max: Number(env.DATABASE_POOL_MAX || 5),
     idleTimeoutMillis: Number(env.DATABASE_IDLE_TIMEOUT_MS || 30_000),
-    // Better Auth receives the raw pg Pool and addresses its tables by their
-    // model names. Search its private schema first while leaving application
-    // queries fully-qualified as public.* or auth.*.
-    options: '-c search_path=auth,public',
+    // Keep Better Auth's custom table names in public. Passing a search_path
+    // via PostgreSQL startup options is rejected by Neon pooler endpoints and
+    // is unnecessary when every application query is fully qualified.
   });
 
   pool.on('error', (error) => {

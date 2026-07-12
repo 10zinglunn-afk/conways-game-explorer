@@ -4,6 +4,15 @@
   "main": "worker.mjs",
   "compatibility_date": "2026-07-11",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "BETTER_AUTH_URL": "https://conways-game-explorer.10zinglunn.workers.dev"
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "d4332e03b0874e70b647bfeea352a489"
+    }
+  ],
   "assets": {
     "directory": "./worker-assets",
     "binding": "ASSETS",

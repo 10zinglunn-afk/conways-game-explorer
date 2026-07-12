@@ -3,11 +3,10 @@
 -- transactions and API handlers rather than browser-facing RLS/Data API calls.
 
 create extension if not exists pgcrypto;
-create schema if not exists auth;
 
 -- Better Auth core tables. Column names are mapped to snake_case in
 -- server/auth.mjs so the schema remains easy to inspect with SQL.
-create table if not exists auth.auth_users (
+create table if not exists public.auth_users (
   id text primary key default gen_random_uuid()::text,
   name text not null,
   email text not null unique,
@@ -17,7 +16,7 @@ create table if not exists auth.auth_users (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists auth.auth_sessions (
+create table if not exists public.auth_sessions (
   id text primary key default gen_random_uuid()::text,
   expires_at timestamptz not null,
   token text not null unique,
@@ -25,17 +24,17 @@ create table if not exists auth.auth_sessions (
   updated_at timestamptz not null default now(),
   ip_address text,
   user_agent text,
-  user_id text not null references auth.auth_users(id) on delete cascade
+  user_id text not null references public.auth_users(id) on delete cascade
 );
 
-create index if not exists auth_sessions_user_idx on auth.auth_sessions(user_id);
-create index if not exists auth_sessions_expires_idx on auth.auth_sessions(expires_at);
+create index if not exists auth_sessions_user_idx on public.auth_sessions(user_id);
+create index if not exists auth_sessions_expires_idx on public.auth_sessions(expires_at);
 
-create table if not exists auth.auth_accounts (
+create table if not exists public.auth_accounts (
   id text primary key default gen_random_uuid()::text,
   account_id text not null,
   provider_id text not null,
-  user_id text not null references auth.auth_users(id) on delete cascade,
+  user_id text not null references public.auth_users(id) on delete cascade,
   access_token text,
   refresh_token text,
   id_token text,
@@ -48,9 +47,9 @@ create table if not exists auth.auth_accounts (
   unique (provider_id, account_id)
 );
 
-create index if not exists auth_accounts_user_idx on auth.auth_accounts(user_id);
+create index if not exists auth_accounts_user_idx on public.auth_accounts(user_id);
 
-create table if not exists auth.auth_verifications (
+create table if not exists public.auth_verifications (
   id text primary key default gen_random_uuid()::text,
   identifier text not null,
   value text not null,
@@ -60,12 +59,12 @@ create table if not exists auth.auth_verifications (
 );
 
 create index if not exists auth_verifications_identifier_idx
-  on auth.auth_verifications(identifier);
+  on public.auth_verifications(identifier);
 create index if not exists auth_verifications_expires_idx
-  on auth.auth_verifications(expires_at);
+  on public.auth_verifications(expires_at);
 
 create table if not exists public.profiles (
-  id text primary key references auth.auth_users(id) on delete cascade,
+  id text primary key references public.auth_users(id) on delete cascade,
   username text not null unique,
   display_name text not null,
   avatar_url text not null default '',
@@ -78,7 +77,7 @@ create table if not exists public.profiles (
 
 create table if not exists public.creations (
   id uuid primary key default gen_random_uuid(),
-  owner_id text not null references auth.auth_users(id) on delete cascade,
+  owner_id text not null references public.auth_users(id) on delete cascade,
   slug text not null,
   title text not null,
   description text not null default '',
@@ -137,7 +136,7 @@ alter table public.creations
   on delete set null;
 
 create table if not exists public.stars (
-  profile_id text not null references auth.auth_users(id) on delete cascade,
+  profile_id text not null references public.auth_users(id) on delete cascade,
   creation_id uuid not null references public.creations(id) on delete cascade,
   created_at timestamptz not null default now(),
   primary key(profile_id, creation_id)
