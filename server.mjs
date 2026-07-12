@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { toNodeHandler } from 'better-auth/node';
 import { createBetterAuth, createPostgresPool } from './server/auth.mjs';
+import { getCommunityConfig, injectCommunityConfig, renderCommunityConfigScript } from './server/community-config.mjs';
 import { handleCommunityRequest } from './server/community-api.mjs';
 
 const defaultHost = '127.0.0.1';
@@ -18,29 +19,7 @@ const types = {
   '.svg': 'image/svg+xml',
 };
 
-export function getCommunityConfig(env = process.env) {
-  if (env.DATABASE_URL && env.BETTER_AUTH_SECRET) {
-    return {
-      backend: 'postgres',
-      apiBase: '/api/community',
-      authBase: '/api/auth',
-    };
-  }
-
-  if (env.SUPABASE_URL && env.SUPABASE_ANON_KEY) {
-    return {
-      backend: 'supabase',
-      supabaseUrl: env.SUPABASE_URL,
-      supabaseAnonKey: env.SUPABASE_ANON_KEY,
-    };
-  }
-
-  return { backend: 'local' };
-}
-
-export function renderCommunityConfigScript(env = process.env) {
-  return `window.LIFE_LOGIC_COMMUNITY = ${JSON.stringify(getCommunityConfig(env))};\n`;
-}
+export { getCommunityConfig, injectCommunityConfig, renderCommunityConfigScript } from './server/community-config.mjs';
 
 export function createRequestHandler({
   root = defaultRoot,
@@ -106,13 +85,6 @@ export function createRequestHandler({
       response.end('Not found');
     }
   };
-}
-
-export function injectCommunityConfig(html, env = process.env) {
-  return html.replace(
-    /<script id="life-runtime-config" type="application\/json">[\s\S]*?<\/script>/,
-    `<script id="life-runtime-config" type="application/json">${JSON.stringify(getCommunityConfig(env))}</script>`,
-  );
 }
 
 export function startServer({

@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createBetterAuth, createBetterAuthHandler, createPostgresPool } from './auth.mjs';
+import {
+  createBetterAuth,
+  createBetterAuthHandler,
+  createPostgresPool,
+  getDatabaseConnectionString,
+} from './auth.mjs';
 
 test('PostgreSQL auth is opt-in when DATABASE_URL is absent', () => {
   const env = { NODE_ENV: 'test' };
@@ -28,6 +33,17 @@ test('PostgreSQL pool resolves Better Auth tables from the auth schema', async (
   });
 
   assert.equal(pool.options.options, '-c search_path=auth,public');
+  await pool.end();
+});
+
+test('PostgreSQL pool accepts the Cloudflare Hyperdrive connection binding', async () => {
+  const env = {
+    HYPERDRIVE: { connectionString: 'postgres://example.invalid/life' },
+  };
+  const pool = createPostgresPool({ env });
+
+  assert.equal(getDatabaseConnectionString(env), 'postgres://example.invalid/life');
+  assert.equal(pool.options.connectionString, 'postgres://example.invalid/life');
   await pool.end();
 });
 

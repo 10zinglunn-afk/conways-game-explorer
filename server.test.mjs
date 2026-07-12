@@ -71,3 +71,26 @@ test('PostgreSQL runtime config exposes only same-origin API paths', async () =>
   assert.doesNotMatch(writes[1].body, /postgres:\/\//);
   assert.doesNotMatch(writes[1].body, /do-not-expose-this/);
 });
+
+test('Hyperdrive runtime config exposes only same-origin API paths', async () => {
+  const handler = createRequestHandler({
+    env: {
+      HYPERDRIVE: { connectionString: 'postgres://user:secret@example.test/life' },
+      BETTER_AUTH_SECRET: 'do-not-expose-this',
+    },
+    auth: null,
+    databasePool: null,
+    authHandler: null,
+  });
+  const writes = [];
+  const response = {
+    writeHead(status, headers) { writes.push({ status, headers }); },
+    end(body) { writes.push({ body }); },
+  };
+
+  await handler({ url: '/community-config.js', method: 'GET', headers: {} }, response);
+
+  assert.match(writes[1].body, /"backend":"postgres"/);
+  assert.doesNotMatch(writes[1].body, /postgres:\/\//);
+  assert.doesNotMatch(writes[1].body, /do-not-expose-this/);
+});

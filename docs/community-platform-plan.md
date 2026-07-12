@@ -14,7 +14,7 @@
 | Backend-selection factory (`createCommunityRepository`) | Done: local default, server-mediated PostgreSQL, and legacy Supabase compatibility path |
 | Shared contract test suite | Done (`src/community-repository.contract.js`) |
 | URL share links + import-on-load | Done |
-| PostgreSQL project | Foundation implemented; provider/database URL is not configured yet, so migration/auth have not been exercised live |
+| PostgreSQL project | Cloudflare Worker + Hyperdrive deployment foundation is implemented; provider/database URL and Hyperdrive binding are not configured yet, so migration/auth have not been exercised live |
 | Supabase schema / RLS / functions | Historical reference only. Existing migrations remain available for comparison but are no longer the active deployment target. |
 | Authorization + counter tests | API/auth/repository unit coverage is added. Historical Supabase pgTAP remains reference; cross-owner and counter behavior still need a disposable PostgreSQL run. |
 | Cloud repository implementation | Better Auth, migration runner, parameterized PostgreSQL repository, API routes, and browser proxy are implemented; live contract remains pending a disposable database. |
@@ -232,7 +232,7 @@ a deliberate, separate effort:
 - App Router routes: `/` (playground), `/c/[slug]` (public creation, SSR),
   `/u/[username]` (profile, SSR). The interim URL-hash share (`#build=...`)
   shipped in Phase 1 is replaced by real `/c/[slug]` URLs.
-- Vercel + GitHub: preview deploys per PR, production from `main`.
+- Cloudflare Workers + GitHub: preview deploys per PR, production from `main`, with Hyperdrive bindings per environment.
 
 This phase is **not started** and can begin after the Phase 2 changes are merged
 and any production deployment/secrets workflow is settled.

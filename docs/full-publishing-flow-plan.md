@@ -274,8 +274,8 @@ unbuilt safety controls while preserving the intended final product.
 
 - Create separate development/test, preview/staging, and production PostgreSQL
   environments (Neon branches or an explicitly documented safe equivalent).
-- Configure Vercel preview deployments for pull requests and production from
-  `main`.
+- Configure Cloudflare Workers preview deployments for pull requests and
+  production from `main`; bind Hyperdrive separately in each environment.
 - Store environment-specific public and server-only credentials correctly.
 - Add an ordered migration workflow with pre-deploy checks and rollback/forward
   recovery instructions.

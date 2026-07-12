@@ -14,7 +14,8 @@ Target stack:
 - Use TypeScript incrementally, starting with pure logic and shared contracts: Life engine, pattern parsing, sharing, and community repository types.
 - Move the app shell to Next.js/React only when the Better Auth + PostgreSQL acceptance criteria are stable and public SSR routes are the next product goal.
 - Keep Better Auth + PostgreSQL as the primary backend unless a measured product need proves otherwise.
-- Use Vercel/GitHub preview deployments when the Next.js migration begins.
+- Use Cloudflare Workers/GitHub preview deployments; keep the app and API on
+  the same Worker origin, with Hyperdrive pooling PostgreSQL connections.
 - Use Tailwind CSS only if/when the UI is moved into componentized React/Next.js; plain CSS is fine for the current vanilla app.
 
 Default decisions:
@@ -45,3 +46,7 @@ Execution priorities:
   pending a disposable `DATABASE_URL`. The authored Supabase migrations are
   retained as historical reference because the linked free project is paused
   and the organization is currently at its active-project limit.
+- Cloudflare Worker deployment code, static-asset build, Hyperdrive-aware
+  connection resolution, and dry-run bundle validation are complete. Account
+  login, Hyperdrive provisioning, migration execution, email delivery, and a
+  first permanent deployment remain external setup steps.

@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "conways-game-explorer",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-07-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./worker-assets",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/community-config.js", "/life-config.js", "/life-runtime.js"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}

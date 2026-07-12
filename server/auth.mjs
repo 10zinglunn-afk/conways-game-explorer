@@ -2,12 +2,18 @@ import { Pool } from 'pg';
 import { betterAuth } from 'better-auth';
 import { toNodeHandler } from 'better-auth/node';
 import { magicLink } from 'better-auth/plugins';
+import { dash } from '@better-auth/infra';
+
+export function getDatabaseConnectionString(env = process.env) {
+  return env.DATABASE_URL || env.HYPERDRIVE?.connectionString || null;
+}
 
 export function createPostgresPool({ env = process.env } = {}) {
-  if (!env.DATABASE_URL) return null;
+  const connectionString = getDatabaseConnectionString(env);
+  if (!connectionString) return null;
 
   const pool = new Pool({
-    connectionString: env.DATABASE_URL,
+    connectionString,
     max: Number(env.DATABASE_POOL_MAX || 5),
     idleTimeoutMillis: Number(env.DATABASE_IDLE_TIMEOUT_MS || 30_000),
     // Better Auth receives the raw pg Pool and addresses its tables by their
@@ -44,11 +50,47 @@ export function createBetterAuth({
       .filter(Boolean),
   ];
 
+  const plugins = [magicLink({
+    storeToken: 'hashed',
+    async sendMagicLink(payload, context) {
+      if (sendMagicLink) {
+        await sendMagicLink(payload, context);
+        return;
+      }
+
+      if (env.NODE_ENV !== 'production' && env.BETTER_AUTH_LOG_LINKS !== '0') {
+        console.log(`[better-auth] Magic link for ${payload.email}: ${payload.url}`);
+        return;
+      }
+
+      throw new Error(
+        'Magic-link delivery is not configured. Provide a sendMagicLink implementation.',
+      );
+    },
+  })];
+
+  // Dash is intentionally opt-in: the API key stays in the server runtime
+  // (a Cloudflare secret in production) and is never part of browser config.
+  if (env.BETTER_AUTH_API_KEY) {
+    plugins.push(dash({
+      apiKey: env.BETTER_AUTH_API_KEY,
+      apiUrl: env.BETTER_AUTH_API_URL,
+      kvUrl: env.BETTER_AUTH_KV_URL,
+    }));
+  }
+
   return betterAuth({
     database,
     secret: env.BETTER_AUTH_SECRET,
     baseURL,
     trustedOrigins,
+    advanced: {
+      // Cloudflare sets this header at the edge; retain the usual proxy header
+      // as a local-development fallback for Better Auth's rate limiter.
+      ipAddress: {
+        ipAddressHeaders: ['cf-connecting-ip', 'x-forwarded-for'],
+      },
+    },
     user: {
       modelName: 'auth_users',
       fields: {
@@ -91,24 +133,7 @@ export function createBetterAuth({
         updatedAt: 'updated_at',
       },
     },
-    plugins: [magicLink({
-      storeToken: 'hashed',
-      async sendMagicLink(payload, context) {
-        if (sendMagicLink) {
-          await sendMagicLink(payload, context);
-          return;
-        }
-
-        if (env.NODE_ENV !== 'production' && env.BETTER_AUTH_LOG_LINKS !== '0') {
-          console.log(`[better-auth] Magic link for ${payload.email}: ${payload.url}`);
-          return;
-        }
-
-        throw new Error(
-          'Magic-link delivery is not configured. Provide a sendMagicLink implementation.',
-        );
-      },
-    })],
+    plugins,
   });
 }
 

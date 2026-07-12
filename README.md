@@ -52,7 +52,7 @@ The larger goal is a GitHub-like creative community for Game of Life machines:
 2. Apply and live-test the authored durable-version migration through the Better Auth + PostgreSQL server adapter; local repository and browser coverage is complete.
 3. Move the app shell to Next.js while keeping the Life engine as pure reusable logic.
 4. Add public `/c/[slug]` and `/u/[username]` pages for SEO-indexable builds and profiles.
-5. Deploy through Vercel with GitHub preview deployments.
+5. Deploy through Cloudflare Workers with GitHub preview deployments.
 6. Expand Logic Lab with reusable gates, clocks, signal lanes, calculators, tutorials, and featured builds.
 
 LinkedIn launch shape:
@@ -71,6 +71,7 @@ node --check src/community.js
 node --check src/patterns.js
 node --check src/presets.js
 node --check server.mjs
+node --check worker.mjs
 ```
 
 The Playwright suite covers the three workspaces in desktop Chromium and an

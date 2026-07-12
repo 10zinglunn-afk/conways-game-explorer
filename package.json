@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:worker": "node scripts/build-worker-assets.mjs",
     "dev": "node server.mjs",
+    "dev:worker": "npm run build:worker && wrangler dev",
+    "deploy:worker": "npm run build:worker && wrangler deploy",
     "test:e2e": "playwright test",
     "test:supabase:live": "node --test src/community-repository.supabase.integration.test.js",
     "db:migrate": "node scripts/migrate-postgres.mjs",
@@ -12,11 +15,13 @@
     "start": "node server.mjs"
   },
   "dependencies": {
+    "@better-auth/infra": "^0.3.6",
     "@supabase/supabase-js": "2.110.0",
     "better-auth": "^1.6.23",
     "pg": "^8.22.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1"
+    "@playwright/test": "^1.61.1",
+    "wrangler": "^4.110.0"
   }
 }
