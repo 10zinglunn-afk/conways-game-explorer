@@ -103,6 +103,18 @@ test('renderCommunityConfigScript exposes only safe browser community config', (
   assert.doesNotMatch(script, /do-not-leak/);
 });
 
+test('renderCommunityConfigScript selects the server-mediated PostgreSQL backend without credentials', () => {
+  const script = renderCommunityConfigScript({
+    DATABASE_URL: 'postgres://user:secret@example.test/life',
+    BETTER_AUTH_SECRET: 'do-not-expose-this',
+  });
+
+  assert.match(script, /"backend":"postgres"/);
+  assert.match(script, /"apiBase":"\/api\/community"/);
+  assert.doesNotMatch(script, /postgres:\/\//);
+  assert.doesNotMatch(script, /do-not-expose-this/);
+});
+
 test('renderCommunityConfigScript falls back to local config when Supabase credentials are incomplete', () => {
   assert.match(
     renderCommunityConfigScript({ SUPABASE_URL: 'https://example.supabase.co' }),

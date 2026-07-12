@@ -1,0 +1,73 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequestHandler } from './server.mjs';
+
+test('auth routes explain missing PostgreSQL configuration without exposing secrets', async () => {
+  const writes = [];
+  const response = {
+    writeHead(status, headers) {
+      writes.push({ type: 'head', status, headers });
+    },
+    end(body) {
+      writes.push({ type: 'body', body });
+    },
+  };
+  const handler = createRequestHandler({
+    env: {},
+    auth: null,
+    databasePool: null,
+    authHandler: null,
+  });
+
+  await handler({ url: '/api/auth/get-session' }, response);
+
+  assert.equal(writes[0].status, 503);
+  assert.match(writes[1].body, /DATABASE_URL/);
+  assert.doesNotMatch(writes[1].body, /postgres:\/\//);
+});
+
+test('community routes explain missing PostgreSQL configuration', async () => {
+  const writes = [];
+  const response = {
+    writeHead(status, headers) {
+      writes.push({ type: 'head', status, headers });
+    },
+    end(body) {
+      writes.push({ type: 'body', body });
+    },
+  };
+  const handler = createRequestHandler({
+    env: {},
+    auth: null,
+    databasePool: null,
+    authHandler: null,
+  });
+
+  await handler({ url: '/api/community/state', method: 'GET', headers: {} }, response);
+
+  assert.equal(writes[0].status, 503);
+  assert.match(writes[1].body, /PostgreSQL community backend/);
+});
+
+test('PostgreSQL runtime config exposes only same-origin API paths', async () => {
+  const handler = createRequestHandler({
+    env: {
+      DATABASE_URL: 'postgres://user:secret@example.test/life',
+      BETTER_AUTH_SECRET: 'do-not-expose-this',
+    },
+    auth: null,
+    databasePool: null,
+    authHandler: null,
+  });
+  const writes = [];
+  const response = {
+    writeHead(status, headers) { writes.push({ status, headers }); },
+    end(body) { writes.push({ body }); },
+  };
+
+  await handler({ url: '/community-config.js', method: 'GET', headers: {} }, response);
+
+  assert.match(writes[1].body, /"backend":"postgres"/);
+  assert.doesNotMatch(writes[1].body, /postgres:\/\//);
+  assert.doesNotMatch(writes[1].body, /do-not-expose-this/);
+});

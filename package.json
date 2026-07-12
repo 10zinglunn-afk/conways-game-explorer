@@ -7,11 +7,14 @@
     "dev": "node server.mjs",
     "test:e2e": "playwright test",
     "test:supabase:live": "node --test src/community-repository.supabase.integration.test.js",
+    "db:migrate": "node scripts/migrate-postgres.mjs",
     "test": "node --test",
     "start": "node server.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "2.110.0"
+    "@supabase/supabase-js": "2.110.0",
+    "better-auth": "^1.6.23",
+    "pg": "^8.22.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1"

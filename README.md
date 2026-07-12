@@ -8,7 +8,9 @@ The current app is a large, zoomable finite toroidal world. The board wraps at t
 - **Dev Studio**: treat gliders as signals, stamp logic components, save immutable versions, and restore earlier snapshots as new versions.
 - **Community**: create a local profile, save board states, publish builds, star them, clone/remix them, and view a trending list.
 
-Community mode stays local-first by default. When Supabase runtime config is present, it adds magic-link sign-in, migrates local builds after sign-in, and gates publish/star/clone until the user is signed in.
+Community mode stays local-first by default. The cloud path is being migrated to
+Better Auth + PostgreSQL: the browser will use server endpoints for magic-link
+sign-in, local-build claiming, and publish/star/clone authorization.
 
 ## Run
 
@@ -24,13 +26,10 @@ visit another workspace and return.
 
 ## Community Cloud
 
-Local drafts work with no network config. To enable the Supabase-backed community UI, run the dev server with:
-
-```bash
-SUPABASE_URL=... SUPABASE_ANON_KEY=... npm run dev
-```
-
-The server injects those safe browser values into the inline `life-runtime-config` JSON tag when serving `index.html`.
+Local drafts work with no network config. The cloud path uses a server-only
+`DATABASE_URL`, `BETTER_AUTH_SECRET`, and a configured Better Auth email sender.
+Database credentials are never injected into the browser. The setup guide and
+development magic-link fallback are in [postgres/README.md](postgres/README.md).
 
 ## Controls
 
@@ -50,7 +49,7 @@ The server injects those safe browser values into the inline `life-runtime-confi
 The larger goal is a GitHub-like creative community for Game of Life machines:
 
 1. Stabilize the current Playground, Dev Lab, and local-first Community MVP.
-2. Apply and live-test the authored durable-version migration once the linked Supabase project can be restored; local repository and browser coverage is complete.
+2. Apply and live-test the authored durable-version migration through the Better Auth + PostgreSQL server adapter; local repository and browser coverage is complete.
 3. Move the app shell to Next.js while keeping the Life engine as pure reusable logic.
 4. Add public `/c/[slug]` and `/u/[username]` pages for SEO-indexable builds and profiles.
 5. Deploy through Vercel with GitHub preview deployments.

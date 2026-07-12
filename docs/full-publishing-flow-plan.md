@@ -16,7 +16,7 @@ unbuilt safety controls while preserving the intended final product.
 
 1. A guest enters Playground or Dev Studio and creates a pattern.
 2. The guest saves a local draft with its board and replay settings intact.
-3. The guest signs in by magic link and the local draft migrates to Supabase.
+3. The guest signs in by magic link and the local draft migrates to PostgreSQL.
 4. The builder supplies valid publishing metadata and an accessible preview.
 5. Publishing creates a stable canonical URL at `/c/[slug]`.
 6. A signed-out visitor can open and run the public creation.
@@ -31,8 +31,11 @@ unbuilt safety controls while preserving the intended final product.
 - Keep local creation available without authentication.
 - Require authentication for cloud publishing, starring, commenting, and
   remixing.
-- Keep Supabase/Postgres as the system of record for community data.
-- Apply every schema change through an authored migration with RLS tests.
+- Keep PostgreSQL as the system of record for community data. Better Auth owns
+  authentication/session tables; application data is accessed through
+  server-side repository methods.
+- Apply every schema change through an authored PostgreSQL migration with
+  authorization and ownership tests.
 - Treat creation versions as immutable snapshots.
 - Do not expose service-role credentials to the browser.
 - Do not open publishing to the general public until the public-launch gate is
@@ -88,7 +91,7 @@ unbuilt safety controls while preserving the intended final product.
   existing creation.
 - Add methods to update creation metadata, list versions, load a version,
   unpublish, and delete/archive a creation.
-- Ensure local and Supabase repositories implement identical behavior.
+- Ensure local and PostgreSQL repositories implement identical behavior.
 - Preserve settings and lineage when cloning a creation.
 - Make version creation and `current_version_id` updates atomic.
 
@@ -105,14 +108,15 @@ unbuilt safety controls while preserving the intended final product.
 ### Verification
 
 - Extend the shared repository contract for update/version/archive behavior.
-- Add RLS tests for cross-owner version and metadata writes.
+- Add server authorization tests for cross-owner version and metadata writes.
 - Test version rollback as a new snapshot rather than mutation of history.
-- Run the live Supabase contract against a disposable test account/project.
+- Run the live PostgreSQL contract against a disposable database and test the
+  Better Auth session flow through the server API.
 
 ### Exit criteria
 
 - A design can be created, reopened, edited, versioned, restored, and deleted
-  locally and in Supabase without data loss or duplicate project records.
+  locally and in PostgreSQL without data loss or duplicate project records.
 - All replay settings survive save, reload, clone, and migration.
 
 ## Phase 2 — Build the validated publishing workflow
@@ -141,7 +145,7 @@ unbuilt safety controls while preserving the intended final product.
 
 ### Verification
 
-- Test every validation rule locally and through Supabase.
+- Test every validation rule locally and through PostgreSQL.
 - Test slug collision, repeated publish requests, failed requests, retry, later
   versions, and unpublish/republish.
 - Confirm private content never becomes readable before the transaction
@@ -212,7 +216,7 @@ unbuilt safety controls while preserving the intended final product.
 
 - Add a `comments` table with creation, author, body, timestamps, edit state, and
   moderation state.
-- Add RLS for public reads and authenticated author writes.
+- Add server authorization for public reads and authenticated author writes.
 - Add create, edit, soft-delete, list, and report repository methods.
 - Maintain comment counts from source-of-truth rows.
 - Paginate threads and handle removed authors/content predictably.
@@ -220,7 +224,7 @@ unbuilt safety controls while preserving the intended final product.
 ### Verification
 
 - Test search/filter combinations and pagination boundaries.
-- Test comment RLS, edits, deletion, counts, and removed/private creations.
+- Test comment authorization, edits, deletion, counts, and removed/private creations.
 - Verify Community never exposes private creations through search or counts.
 
 ### Exit criteria
@@ -268,8 +272,8 @@ unbuilt safety controls while preserving the intended final product.
 
 ### Environments and delivery
 
-- Create separate development/test, preview/staging, and production Supabase
-  environments or an explicitly documented safe equivalent.
+- Create separate development/test, preview/staging, and production PostgreSQL
+  environments (Neon branches or an explicitly documented safe equivalent).
 - Configure Vercel preview deployments for pull requests and production from
   `main`.
 - Store environment-specific public and server-only credentials correctly.
@@ -340,8 +344,8 @@ Every phase should preserve or add coverage at the appropriate layer:
 | Layer | Required coverage |
 | --- | --- |
 | Pure logic | Life rules, patterns, transforms, settings, validation, slugs |
-| Repository contract | Local/Supabase behavioral parity and error semantics |
-| Database | Migrations, constraints, RLS, counters, RPC atomicity, private-data isolation |
+| Repository contract | Local/PostgreSQL behavioral parity and error semantics |
+| Database | Migrations, constraints, transaction atomicity, private-data isolation |
 | Components | Form validation, state transitions, keyboard and accessible behavior |
 | Browser | Workspace workflows, Auth callback, publish, public pages, remix journey |
 | Production smoke | Canonical URLs, Auth redirects, public/private access, observability |
@@ -353,7 +357,7 @@ Every phase should preserve or add coverage at the appropriate layer:
 - Keep commits scoped; never mix unrelated cleanup into a migration or security
   change.
 - Run local unit/contract tests on every slice and hosted integration tests when
-  Supabase behavior changes.
+  PostgreSQL or Better Auth behavior changes.
 - Record manual browser verification for visual or interaction-heavy slices.
 - Update `README.md`, `CLAUDE.md`, and `docs/community-platform-plan.md` when a
   phase changes the documented architecture or status.

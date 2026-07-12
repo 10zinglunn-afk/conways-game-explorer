@@ -217,8 +217,8 @@ let communityState = community.getState();
 
 const communityRuntimeConfig = getCommunityRuntimeConfig();
 const communityAuth = {
-  cloudRequested: communityRuntimeConfig.backend === 'supabase',
-  cloudConfigured: isSupabaseCommunityConfigured(communityRuntimeConfig),
+  cloudRequested: ['supabase', 'postgres'].includes(communityRuntimeConfig.backend),
+  cloudConfigured: isCloudCommunityConfigured(communityRuntimeConfig),
   cloudRepo: null,
   supabaseClient: null,
   session: null,
@@ -329,6 +329,8 @@ function getCommunityRuntimeConfig() {
       || config.moduleUrl
       || supabase.moduleUrl
       || 'https://esm.sh/@supabase/supabase-js@2',
+    apiBase: config.apiBase || '/api/community',
+    authBase: config.authBase || '/api/auth',
     redirectTo: config.redirectTo || window.location.href.split('#')[0],
   };
 }
@@ -349,11 +351,15 @@ function isSupabaseCommunityConfigured(config) {
   return config.backend === 'supabase' && Boolean(config.supabaseUrl && config.supabaseAnonKey);
 }
 
+function isCloudCommunityConfigured(config) {
+  return config.backend === 'postgres' || isSupabaseCommunityConfigured(config);
+}
+
 async function initializeCommunityBackend() {
   renderCommunityAuth();
 
   if (communityAuth.cloudRequested && !communityAuth.cloudConfigured) {
-    communityAuth.message = 'Cloud config missing URL or key.';
+    communityAuth.message = 'Cloud configuration is incomplete.';
     renderCommunityAuth();
     return;
   }
@@ -365,6 +371,25 @@ async function initializeCommunityBackend() {
   renderCommunityAuth();
 
   try {
+    if (communityRuntimeConfig.backend === 'postgres') {
+      const cloudRepo = createCommunityRepository({
+        backend: 'postgres',
+        apiBase: communityRuntimeConfig.apiBase,
+        authBase: communityRuntimeConfig.authBase,
+      });
+      communityAuth.cloudRepo = cloudRepo;
+      subscribeCommunityAuth(cloudRepo);
+
+      const session = await readCommunityAuthSession(cloudRepo);
+      if (session) {
+        await handleCommunityAuthSession(session, { reason: 'initial session' });
+      } else {
+        communityAuth.message = 'Sign in to publish, star, or clone.';
+        renderCommunityAuth();
+      }
+      return;
+    }
+
     const client = await createSupabaseClientFromRuntime(communityRuntimeConfig);
     const cloudRepo = createCommunityRepository({ backend: 'supabase', client });
     communityAuth.supabaseClient = client;

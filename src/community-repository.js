@@ -34,11 +34,201 @@ import {
 export function createCommunityRepository({ backend = 'local', ...options } = {}) {
   if (backend === 'local') return createLocalCommunityRepository(options);
 
+  if (backend === 'postgres') {
+    return createPostgresCommunityRepository(options);
+  }
+
   if (backend === 'supabase') {
     return createSupabaseCommunityRepository(options);
   }
 
   throw new Error(`Unknown community backend "${backend}".`);
+}
+
+// Browser-side proxy for the Better Auth + PostgreSQL server API. It never
+// receives a database credential: cookies authenticate same-origin requests and
+// the Node server owns all PostgreSQL access.
+export function createPostgresCommunityRepository({
+  fetch: fetchImpl = globalThis.fetch,
+  apiBase = '/api/community',
+  authBase = '/api/auth',
+} = {}) {
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('PostgreSQL community backend requires fetch.');
+  }
+
+  let state = createCommunityState();
+  const find = (creationId) => state.creations.find((creation) => creation.id === creationId) || null;
+  const remember = (creation, { active = true } = {}) => {
+    if (!creation) return null;
+    state = {
+      ...state,
+      creations: replaceCreation(state.creations, creation),
+      ...(active ? { activeCreationId: creation.id } : {}),
+    };
+    return creation;
+  };
+  const request = (base, path, options = {}) => requestJson(fetchImpl, `${stripTrailingSlash(base)}${path}`, options);
+  const communityRequest = (path, options) => request(apiBase, path, options);
+  const authRequest = (path, options) => request(authBase, path, options);
+  const createCreation = async (input, { publish = false } = {}) => {
+    const creation = await communityRequest('/creations', {
+      method: 'POST',
+      body: { ...input, publish },
+    });
+    return remember(creation);
+  };
+
+  return {
+    backend: 'postgres',
+    requiresAuth: true,
+
+    getState() {
+      return state;
+    },
+
+    async getAuthSession() {
+      const data = await authRequest('/get-session');
+      if (!data?.session || !data?.user) return null;
+      return { ...data.session, user: data.user };
+    },
+
+    async getAuthUser() {
+      return (await this.getAuthSession())?.user || null;
+    },
+
+    async sendMagicLink(email, { redirectTo } = {}) {
+      return authRequest('/sign-in/magic-link', {
+        method: 'POST',
+        body: {
+          email,
+          ...(redirectTo ? { callbackURL: redirectTo } : {}),
+        },
+      });
+    },
+
+    async signOut() {
+      await authRequest('/sign-out', { method: 'POST', body: {} });
+      state = createCommunityState();
+      return null;
+    },
+
+    onAuthStateChange() {
+      // Better Auth completes a magic-link flow with a browser redirect. The
+      // next load reads /get-session, so no browser SDK subscription is needed.
+      return createNoopAuthSubscription();
+    },
+
+    async loadCommunityState() {
+      state = await communityRequest('/state');
+      return state;
+    },
+
+    async saveProfile(input) {
+      const profile = await communityRequest('/profile', { method: 'POST', body: input });
+      state = { ...state, profile };
+      return profile;
+    },
+
+    createCreation,
+    saveCreation: createCreation,
+
+    async saveVersion(creationId, input) {
+      return remember(await communityRequest(`/creations/${encodeURIComponent(creationId)}/versions`, {
+        method: 'POST', body: input,
+      }));
+    },
+
+    async updateCreationMetadata(creationId, patch) {
+      return remember(await communityRequest(`/creations/${encodeURIComponent(creationId)}`, {
+        method: 'PATCH', body: patch,
+      }), { active: false });
+    },
+
+    async listVersions(creationId) {
+      const creation = find(creationId);
+      return creation?.versions?.slice().sort((left, right) => right.versionNumber - left.versionNumber) || [];
+    },
+
+    async loadVersion(creationId, versionId) {
+      return (await this.listVersions(creationId)).find((version) => version.id === versionId) || null;
+    },
+
+    async restoreVersion(creationId, versionId) {
+      return remember(await communityRequest(`/creations/${encodeURIComponent(creationId)}/restore`, {
+        method: 'POST', body: { versionId },
+      }));
+    },
+
+    async publishCreation(creationId) {
+      return remember(await communityRequest(`/creations/${encodeURIComponent(creationId)}/publish`, {
+        method: 'POST', body: {},
+      }));
+    },
+
+    async unpublishCreation(creationId) {
+      return remember(await communityRequest(`/creations/${encodeURIComponent(creationId)}/unpublish`, {
+        method: 'POST', body: {},
+      }), { active: false });
+    },
+
+    async archiveCreation(creationId) {
+      const creation = await communityRequest(`/creations/${encodeURIComponent(creationId)}/archive`, {
+        method: 'POST', body: {},
+      });
+      if (creation) {
+        state = {
+          ...state,
+          creations: replaceCreation(state.creations, creation),
+          activeCreationId: state.activeCreationId === creation.id ? null : state.activeCreationId,
+        };
+      }
+      return creation;
+    },
+
+    async deleteCreation(creationId) {
+      const result = await communityRequest(`/creations/${encodeURIComponent(creationId)}`, {
+        method: 'DELETE',
+      });
+      if (!result?.deleted) return false;
+      state = {
+        ...state,
+        creations: state.creations.filter((creation) => creation.id !== creationId),
+        activeCreationId: state.activeCreationId === creationId ? null : state.activeCreationId,
+      };
+      return true;
+    },
+
+    async toggleStar(creationId) {
+      return remember(await communityRequest(`/creations/${encodeURIComponent(creationId)}/star`, {
+        method: 'POST', body: {},
+      }), { active: false });
+    },
+
+    async cloneCreation(creationId) {
+      const data = await communityRequest(`/creations/${encodeURIComponent(creationId)}/remix`, {
+        method: 'POST', body: {},
+      });
+      const remix = data?.remix || data;
+      if (data?.source) remember(data.source, { active: false });
+      return remember(remix);
+    },
+
+    async listTrendingCreations({ limit = 20 } = {}) {
+      const creations = await communityRequest(`/trending?limit=${encodeURIComponent(limit)}`);
+      state = {
+        ...state,
+        creations: creations.reduce((all, creation) => replaceCreation(all, creation), state.creations),
+      };
+      return creations;
+    },
+
+    findCreation: find,
+    setActiveCreation(creationId) {
+      state = { ...state, activeCreationId: creationId };
+      return state;
+    },
+  };
 }
 
 export async function migrateLocalState(localRepo, cloudRepo) {
@@ -754,6 +944,33 @@ function withVersionSettings(creation, settings) {
 
 function createUuid() {
   return globalThis.crypto?.randomUUID?.() || `00000000-0000-4000-8000-${Date.now()}`;
+}
+
+function stripTrailingSlash(value) {
+  return String(value || '').replace(/\/$/, '');
+}
+
+async function requestJson(fetchImpl, url, { method = 'GET', body } = {}) {
+  const response = await fetchImpl(url, {
+    method,
+    credentials: 'same-origin',
+    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  const data = text ? parseJsonResponse(text) : null;
+  if (!response.ok) {
+    throw new Error(data?.error || `Community request failed (${response.status}).`);
+  }
+  return data;
+}
+
+function parseJsonResponse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('Community server returned invalid JSON.');
+  }
 }
 
 export function createLocalCommunityRepository({

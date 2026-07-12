@@ -1,18 +1,23 @@
 # Conway Life Logic Community Platform Plan
 
+> Architecture pivot (2026-07-11): Supabase migrations and repository code are
+> retained as historical reference, but active cloud development now targets
+> Better Auth + PostgreSQL with server-side repository access. This avoids
+> browser-direct database credentials and the paused/free-project constraint.
+
 ## Status snapshot
 
 | Capability | State |
 | --- | --- |
 | Local-first Community MVP (profiles, save, publish, clone/remix, stars, trending, share) | Done, in vanilla JS |
 | Repository seam (`src/community-repository.js`) | Done, async interface |
-| Backend-selection factory (`createCommunityRepository`) | Done, local default + Supabase client path + URL/key factory path |
+| Backend-selection factory (`createCommunityRepository`) | Done: local default, server-mediated PostgreSQL, and legacy Supabase compatibility path |
 | Shared contract test suite | Done (`src/community-repository.contract.js`) |
 | URL share links + import-on-load | Done |
-| Supabase project | Done: `conway-life-community` (`wfkzhsdjzgnmurkgsjvd`, `us-east-1`) |
-| Supabase schema / RLS / functions | Existing hosted migrations through `20260630214126_harden_rpc_security_definer_exposure.sql` are deployed. Phase 1 durable metadata/version RPCs are authored in `20260711165603_durable_creation_versions.sql`, but hosted application is blocked because the linked project is paused and the free organization is at its active-project limit. |
-| RLS + counter-function tests | The existing linked-project suite previously passed 19/19. The suite now contains 27 checks covering atomic creation/version/restore and cross-owner version writes; hosted execution is pending project restoration. Local Docker is unavailable. |
-| Supabase repository implementation | The shared contract covers create/update/version/restore/unpublish/archive/delete parity for local and Supabase repositories. The fake-client suite passes; the expanded live contract is pending restoration of the linked hosted project. |
+| PostgreSQL project | Foundation implemented; provider/database URL is not configured yet, so migration/auth have not been exercised live |
+| Supabase schema / RLS / functions | Historical reference only. Existing migrations remain available for comparison but are no longer the active deployment target. |
+| Authorization + counter tests | API/auth/repository unit coverage is added. Historical Supabase pgTAP remains reference; cross-owner and counter behavior still need a disposable PostgreSQL run. |
+| Cloud repository implementation | Better Auth, migration runner, parameterized PostgreSQL repository, API routes, and browser proxy are implemented; live contract remains pending a disposable database. |
 | Durable Dev Studio workflow | Implemented locally: existing projects append immutable versions, restore creates a new version, metadata/lifecycle actions are available, and debounced crash recovery preserves unsaved board settings. |
 | Browser auth UI + shared-action gating | Done: magic-link controls, sign-out fallback to local mode, local-to-cloud migration on sign-in, and publish/star/clone gating |
 | Next.js migration + public SSR pages | Not started (Phase 3) |
@@ -39,7 +44,28 @@ verified against identical behavior.
 
 ---
 
-## Phase 2 — Supabase backend (complete for the static app)
+## Active cloud architecture — Better Auth + PostgreSQL
+
+The browser remains local-first, but authenticated cloud operations move behind
+server endpoints. Better Auth owns its `user`, `session`, `account`, and
+`verification` tables in PostgreSQL. Community tables use the Better Auth user
+id as a text foreign key and are written through parameterized server-side SQL
+transactions. Authorization is enforced in repository methods and API route
+guards rather than exposing a browser Data API or service credential.
+
+The repository contract remains the boundary used by the UI. This lets the
+local implementation continue to work while the server adapter is introduced,
+and makes the later Next.js route migration a transport change rather than a
+rewrite of Life or community behavior.
+
+The authored active migration in `postgres/migrations` creates Better Auth's
+core schema plus durable community tables. It does not modify or delete the
+historical `supabase/migrations` directory.
+
+## Historical Phase 2 — Supabase backend
+
+The following section documents the previous implementation for reference and
+regression comparison. It is not the active deployment target.
 
 ### 2.1 Identity & auth model (resolves the prior contradiction)
 

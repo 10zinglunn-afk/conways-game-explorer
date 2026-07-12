@@ -2,6 +2,9 @@ import { createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
+import { toNodeHandler } from 'better-auth/node';
+import { createBetterAuth, createPostgresPool } from './server/auth.mjs';
+import { handleCommunityRequest } from './server/community-api.mjs';
 
 const defaultHost = '127.0.0.1';
 const defaultPort = Number(process.env.PORT || 5173);
@@ -16,6 +19,14 @@ const types = {
 };
 
 export function getCommunityConfig(env = process.env) {
+  if (env.DATABASE_URL && env.BETTER_AUTH_SECRET) {
+    return {
+      backend: 'postgres',
+      apiBase: '/api/community',
+      authBase: '/api/auth',
+    };
+  }
+
   if (env.SUPABASE_URL && env.SUPABASE_ANON_KEY) {
     return {
       backend: 'supabase',
@@ -36,10 +47,34 @@ export function createRequestHandler({
   env = process.env,
   host = defaultHost,
   port = defaultPort,
+  databasePool = createPostgresPool({ env }),
+  auth = createBetterAuth({ env, database: databasePool }),
+  authHandler = auth ? toNodeHandler(auth) : null,
+  communityHandler = ({ request, response }) => handleCommunityRequest({
+    request,
+    response,
+    auth,
+    pool: databasePool,
+  }),
 } = {}) {
   return async (request, response) => {
     try {
       const url = new URL(request.url || '/', `http://${host}:${port}`);
+
+      if (await communityHandler({ request, response })) return;
+
+      if (url.pathname === '/api/auth' || url.pathname.startsWith('/api/auth/')) {
+        if (!authHandler) {
+          response.writeHead(503, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({
+            error: 'Better Auth is not configured. Set DATABASE_URL and BETTER_AUTH_SECRET.',
+          }));
+          return;
+        }
+
+        await authHandler(request, response);
+        return;
+      }
 
       if (
         url.pathname === '/life-runtime.js'
