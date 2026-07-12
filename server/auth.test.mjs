@@ -47,7 +47,7 @@ test('PostgreSQL pool accepts the Cloudflare Hyperdrive connection binding', asy
   await pool.end();
 });
 
-test('Better Auth accepts an injected database and magic-link sender', () => {
+test('Better Auth enables password accounts without an email delivery provider', () => {
   const env = {
     DATABASE_URL: 'postgres://example.invalid/life',
     BETTER_AUTH_SECRET: 'test-secret-that-is-long-enough-to-meet-minimum-length',
@@ -70,9 +70,14 @@ test('Better Auth accepts an injected database and magic-link sender', () => {
   const auth = createBetterAuth({
     env,
     database,
-    sendMagicLink: async () => {},
   });
 
   assert.equal(typeof auth.handler, 'function');
   assert.equal(typeof auth.api.getSession, 'function');
+  assert.deepEqual(auth.options.emailAndPassword, {
+    enabled: true,
+    minPasswordLength: 12,
+    maxPasswordLength: 128,
+  });
+  assert.equal(auth.options.plugins.some((plugin) => plugin.id === 'magic-link'), false);
 });

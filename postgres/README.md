@@ -1,8 +1,8 @@
 # Better Auth + PostgreSQL
 
 The active cloud backend is a server-only PostgreSQL connection. Better Auth
-stores users, sessions, accounts, and magic-link verification records in the
-`public.auth_*` tables. Community tables also live in `public` and are
+stores users, sessions, and password-account records in the `public.auth_*`
+tables. Community tables also live in `public` and are
 accessed through parameterized server repository methods. Keeping the custom
 Better Auth tables in `public` avoids a PostgreSQL startup `search_path`
 setting, which hosted pooler endpoints can reject.
@@ -51,7 +51,13 @@ any key that was pasted into a chat or terminal history before adding it. Set
 `BETTER_AUTH_URL` to the final Worker URL (or custom domain) as a non-secret
 Worker variable after the first deployment.
 
-Magic links are logged only by the development server. Production sign-in
-stays safely disabled until an email sender is configured; set
-`BETTER_AUTH_LOG_LINKS=0` in production and provide the `sendMagicLink`
-integration before inviting real users.
+## Account model
+
+Production uses Better Auth's built-in email-and-password flow. Passwords are
+hashed with Better Auth's scrypt implementation and stored only in
+`public.auth_accounts`; the browser communicates only with same-origin
+`/api/auth/*` endpoints and never receives a database credential.
+
+This project intentionally does **not** enable email verification or password
+reset yet, because those flows require a transactional email sender. Invite
+only users who can retain their password until that sender is introduced.

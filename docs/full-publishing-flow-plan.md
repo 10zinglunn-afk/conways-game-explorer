@@ -16,7 +16,7 @@ unbuilt safety controls while preserving the intended final product.
 
 1. A guest enters Playground or Dev Studio and creates a pattern.
 2. The guest saves a local draft with its board and replay settings intact.
-3. The guest signs in by magic link and the local draft migrates to PostgreSQL.
+3. The guest signs in with email and password and the local draft migrates to PostgreSQL.
 4. The builder supplies valid publishing metadata and an accessible preview.
 5. Publishing creates a stable canonical URL at `/c/[slug]`.
 6. A signed-out visitor can open and run the public creation.
@@ -175,7 +175,7 @@ unbuilt safety controls while preserving the intended final product.
 - `/community` — discovery feed.
 - `/c/[slug]` — public creation detail.
 - `/u/[username]` — public creator profile.
-- `/auth/callback` — magic-link/OAuth completion and local-draft claim.
+- `/auth/callback` — future OAuth completion and local-draft claim.
 - Account/settings routes for profile changes and account deletion.
 
 ### Public creation pages
@@ -238,7 +238,7 @@ unbuilt safety controls while preserving the intended final product.
 ### Authentication and accounts
 
 - Configure production and preview redirect URLs.
-- Add branded magic-link templates and expired/invalid-link recovery.
+- Add password recovery only after a transactional email sender is configured.
 - Add username onboarding, uniqueness, normalization, and reserved-name rules.
 - Add profile editing, sign-out-everywhere expectations, account deletion, and
   data export/removal behavior.

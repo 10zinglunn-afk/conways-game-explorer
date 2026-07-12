@@ -183,8 +183,11 @@ const elements = {
   saveProfile: document.querySelector('#save-profile'),
   communityAuth: document.querySelector('#community-auth'),
   communityCloudStatus: document.querySelector('#community-cloud-status'),
+  communityAuthName: document.querySelector('#community-auth-name'),
   communityAuthEmail: document.querySelector('#community-auth-email'),
-  sendMagicLink: document.querySelector('#send-magic-link'),
+  communityAuthPassword: document.querySelector('#community-auth-password'),
+  communitySignUp: document.querySelector('#community-sign-up'),
+  communitySignIn: document.querySelector('#community-sign-in'),
   communitySignOut: document.querySelector('#community-sign-out'),
   communityAuthOutput: document.querySelector('#community-auth-output'),
   creationTitle: document.querySelector('#creation-title'),
@@ -224,7 +227,7 @@ const communityAuth = {
   session: null,
   user: null,
   initializing: false,
-  sendingLink: false,
+  submitting: false,
   migrating: false,
   migratedUserId: null,
   message: '',
@@ -635,7 +638,39 @@ function showSignInRequired(action) {
   renderCommunityAuth();
 }
 
-async function sendCommunityMagicLink() {
+async function signUpCommunity() {
+  if (!communityAuth.cloudConfigured || !communityAuth.cloudRepo) {
+    communityAuth.message = 'Cloud is not ready.';
+    renderCommunityAuth();
+    return;
+  }
+
+  const name = elements.communityAuthName.value.trim() || elements.profileName.value.trim();
+  const email = (elements.communityAuthEmail.value || elements.profileEmail.value).trim();
+  const password = elements.communityAuthPassword.value;
+  if (!name || !email || password.length < 12) {
+    communityAuth.message = 'Enter a name, email, and password with at least 12 characters.';
+    renderCommunityAuth();
+    return;
+  }
+
+  communityAuth.submitting = true;
+  communityAuth.message = 'Creating your account...';
+  renderCommunityAuth();
+
+  try {
+    await communityAuth.cloudRepo.signUpWithEmail({ name, email, password });
+    elements.communityAuthPassword.value = '';
+    await refreshCommunitySession('account created');
+  } catch (error) {
+    communityAuth.message = `Could not create account: ${getErrorMessage(error)}`;
+  } finally {
+    communityAuth.submitting = false;
+    renderCommunityAuth();
+  }
+}
+
+async function signInCommunity() {
   if (!communityAuth.cloudConfigured || !communityAuth.cloudRepo) {
     communityAuth.message = 'Cloud is not ready.';
     renderCommunityAuth();
@@ -643,44 +678,33 @@ async function sendCommunityMagicLink() {
   }
 
   const email = (elements.communityAuthEmail.value || elements.profileEmail.value).trim();
-  if (!email) {
-    communityAuth.message = 'Enter an email for the magic link.';
+  const password = elements.communityAuthPassword.value;
+  if (!email || !password) {
+    communityAuth.message = 'Enter your email and password.';
     renderCommunityAuth();
     return;
   }
 
-  communityAuth.sendingLink = true;
-  communityAuth.message = 'Sending magic link...';
+  communityAuth.submitting = true;
+  communityAuth.message = 'Signing in...';
   renderCommunityAuth();
 
   try {
-    await sendMagicLinkWithRepository(communityAuth.cloudRepo, email, {
-      redirectTo: communityRuntimeConfig.redirectTo,
-    });
-    communityAuth.message = 'Magic link sent. Check your email.';
+    await communityAuth.cloudRepo.signInWithEmail({ email, password });
+    elements.communityAuthPassword.value = '';
+    await refreshCommunitySession('signed in');
   } catch (error) {
-    communityAuth.message = `Could not send link: ${getErrorMessage(error)}`;
+    communityAuth.message = `Could not sign in: ${getErrorMessage(error)}`;
   } finally {
-    communityAuth.sendingLink = false;
+    communityAuth.submitting = false;
     renderCommunityAuth();
   }
 }
 
-async function sendMagicLinkWithRepository(repo, email, options) {
-  if (typeof repo?.sendMagicLink === 'function') {
-    return repo.sendMagicLink(email, options);
-  }
-
-  if (communityAuth.supabaseClient?.auth?.signInWithOtp) {
-    const { error } = await communityAuth.supabaseClient.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: options.redirectTo },
-    });
-    if (error) throw new Error(error.message || 'Could not send magic link.');
-    return null;
-  }
-
-  throw new Error('Magic-link auth is not available.');
+async function refreshCommunitySession(reason) {
+  const session = await readCommunityAuthSession(communityAuth.cloudRepo);
+  if (!session) throw new Error('Account action did not create a session. Try signing in again.');
+  await handleCommunityAuthSession(session, { reason });
 }
 
 async function signOutCommunity() {
@@ -719,8 +743,12 @@ function renderCommunityAuth() {
   elements.communityCloudStatus.textContent = getCloudStatusText({ signedIn, userEmail });
   elements.communitySignOut.hidden = !signedIn;
   elements.communitySignOut.disabled = communityAuth.migrating;
-  elements.sendMagicLink.disabled = !communityAuth.cloudRepo || communityAuth.sendingLink || communityAuth.migrating || signedIn;
-  elements.communityAuthEmail.disabled = signedIn || communityAuth.sendingLink || communityAuth.migrating;
+  const disabled = !communityAuth.cloudRepo || communityAuth.submitting || communityAuth.migrating || signedIn;
+  elements.communitySignUp.disabled = disabled;
+  elements.communitySignIn.disabled = disabled;
+  elements.communityAuthName.disabled = disabled;
+  elements.communityAuthEmail.disabled = disabled;
+  elements.communityAuthPassword.disabled = disabled;
   elements.communityAuthOutput.textContent = communityAuth.message || (signedIn ? 'Cloud active.' : 'Local drafts active.');
 
   if (!elements.communityAuthEmail.value && document.activeElement !== elements.communityAuthEmail) {
@@ -3335,9 +3363,8 @@ function bindEvents() {
 
   elements.saveProfile.addEventListener('click', () => saveLocalProfile());
 
-  elements.sendMagicLink.addEventListener('click', () => {
-    sendCommunityMagicLink();
-  });
+  elements.communitySignUp.addEventListener('click', signUpCommunity);
+  elements.communitySignIn.addEventListener('click', signInCommunity);
 
   elements.communitySignOut.addEventListener('click', () => {
     signOutCommunity();

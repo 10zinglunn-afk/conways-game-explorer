@@ -1,7 +1,6 @@
 import { Pool } from 'pg';
 import { betterAuth } from 'better-auth';
 import { toNodeHandler } from 'better-auth/node';
-import { magicLink } from 'better-auth/plugins';
 import { dash } from '@better-auth/infra';
 
 export function getDatabaseConnectionString(env = process.env) {
@@ -31,7 +30,6 @@ export function createPostgresPool({ env = process.env } = {}) {
 export function createBetterAuth({
   env = process.env,
   database = createPostgresPool({ env }),
-  sendMagicLink,
 } = {}) {
   if (!database) return null;
 
@@ -49,24 +47,7 @@ export function createBetterAuth({
       .filter(Boolean),
   ];
 
-  const plugins = [magicLink({
-    storeToken: 'hashed',
-    async sendMagicLink(payload, context) {
-      if (sendMagicLink) {
-        await sendMagicLink(payload, context);
-        return;
-      }
-
-      if (env.NODE_ENV !== 'production' && env.BETTER_AUTH_LOG_LINKS !== '0') {
-        console.log(`[better-auth] Magic link for ${payload.email}: ${payload.url}`);
-        return;
-      }
-
-      throw new Error(
-        'Magic-link delivery is not configured. Provide a sendMagicLink implementation.',
-      );
-    },
-  })];
+  const plugins = [];
 
   // Dash is intentionally opt-in: the API key stays in the server runtime
   // (a Cloudflare secret in production) and is never part of browser config.
@@ -79,10 +60,19 @@ export function createBetterAuth({
   }
 
   return betterAuth({
+    appName: "Conway's Game of Life",
     database,
     secret: env.BETTER_AUTH_SECRET,
     baseURL,
     trustedOrigins,
+    // Passwords are hashed by Better Auth with scrypt and live only in the
+    // auth_accounts table. We deliberately do not enable verification or
+    // password-reset endpoints: both require a transactional email sender.
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 12,
+      maxPasswordLength: 128,
+    },
     advanced: {
       // Cloudflare sets this header at the edge; retain the usual proxy header
       // as a local-development fallback for Better Auth's rate limiter.

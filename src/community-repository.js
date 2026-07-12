@@ -97,13 +97,21 @@ export function createPostgresCommunityRepository({
       return (await this.getAuthSession())?.user || null;
     },
 
-    async sendMagicLink(email, { redirectTo } = {}) {
-      return authRequest('/sign-in/magic-link', {
+    async signUpWithEmail({ name, email, password }) {
+      return authRequest('/sign-up/email', {
         method: 'POST',
         body: {
+          name,
           email,
-          ...(redirectTo ? { callbackURL: redirectTo } : {}),
+          password,
         },
+      });
+    },
+
+    async signInWithEmail({ email, password }) {
+      return authRequest('/sign-in/email', {
+        method: 'POST',
+        body: { email, password, rememberMe: true },
       });
     },
 
@@ -114,8 +122,8 @@ export function createPostgresCommunityRepository({
     },
 
     onAuthStateChange() {
-      // Better Auth completes a magic-link flow with a browser redirect. The
-      // next load reads /get-session, so no browser SDK subscription is needed.
+      // Better Auth is cookie-based here. The client refreshes /get-session
+      // immediately after an auth action and again on the next page load.
       return createNoopAuthSubscription();
     },
 

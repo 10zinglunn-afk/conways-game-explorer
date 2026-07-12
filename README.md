@@ -9,8 +9,8 @@ The current app is a large, zoomable finite toroidal world. The board wraps at t
 - **Community**: create a local profile, save board states, publish builds, star them, clone/remix them, and view a trending list.
 
 Community mode stays local-first by default. The cloud path is being migrated to
-Better Auth + PostgreSQL: the browser will use server endpoints for magic-link
-sign-in, local-build claiming, and publish/star/clone authorization.
+Better Auth + PostgreSQL: the browser uses server endpoints for email-and-
+password sign-in, local-build claiming, and publish/star/clone authorization.
 
 ## Run
 
@@ -27,9 +27,9 @@ visit another workspace and return.
 ## Community Cloud
 
 Local drafts work with no network config. The cloud path uses a server-only
-`DATABASE_URL`, `BETTER_AUTH_SECRET`, and a configured Better Auth email sender.
+`DATABASE_URL` and `BETTER_AUTH_SECRET`.
 Database credentials are never injected into the browser. The setup guide and
-development magic-link fallback are in [postgres/README.md](postgres/README.md).
+production password-account setup are in [postgres/README.md](postgres/README.md).
 
 ## Controls
 

@@ -338,16 +338,21 @@
                 <span id="community-count">0 builds</span>
               </div>
 
-              <div id="community-auth" class="community-auth" aria-label="Cloud sign in" hidden>
+              <div id="community-auth" class="community-auth" aria-label="Cloud account" hidden>
                 <div class="community-auth-status">
                   <span id="community-cloud-status">Cloud: local</span>
                   <button id="community-sign-out" type="button" hidden>Sign out</button>
                 </div>
-                <div class="community-auth-row">
+                <div class="community-auth-form">
+                  <input id="community-auth-name" type="text" autocomplete="name" placeholder="Display name" />
                   <input id="community-auth-email" type="email" autocomplete="email" placeholder="email@example.com" />
-                  <button id="send-magic-link" type="button">Send link</button>
+                  <input id="community-auth-password" type="password" autocomplete="current-password" minlength="12" maxlength="128" placeholder="Password (12+ characters)" />
+                  <div class="community-auth-actions">
+                    <button id="community-sign-up" type="button">Create account</button>
+                    <button id="community-sign-in" type="button">Sign in</button>
+                  </div>
                 </div>
-                <p id="community-auth-output">Local drafts active.</p>
+                <p id="community-auth-output">Use an email and password to sync local drafts.</p>
               </div>
 
               <div class="community-form" aria-label="Save current creation">

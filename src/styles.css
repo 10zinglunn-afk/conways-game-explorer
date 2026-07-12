@@ -731,6 +731,37 @@ h1 {
   gap: 8px;
 }
 
+.community-auth-form {
+  display: grid;
+  gap: 8px;
+}
+
+.community-auth-form input {
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: rgba(3, 7, 18, 0.64);
+  font-size: 12px;
+}
+
+.community-auth-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.community-auth-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  border-color: rgba(94, 234, 212, 0.28);
+  color: #bffdf4;
+  background: rgba(20, 184, 166, 0.1);
+  font-size: 12px;
+  font-weight: 760;
+}
+
 .community-auth-row input {
   width: 100%;
   min-height: 34px;

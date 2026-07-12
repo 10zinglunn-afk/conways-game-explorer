@@ -66,6 +66,35 @@ test('PostgreSQL browser repository preserves server errors for the UI', async (
   );
 });
 
+test('PostgreSQL browser repository uses same-origin cookies for password account actions', async () => {
+  const calls = [];
+  const repo = createPostgresCommunityRepository({
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return response({ ok: true });
+    },
+  });
+
+  await repo.signUpWithEmail({ name: 'Ada', email: 'ada@example.com', password: 'secure-password' });
+  await repo.signInWithEmail({ email: 'ada@example.com', password: 'secure-password' });
+
+  assert.deepEqual(calls.map((call) => call.url), [
+    '/api/auth/sign-up/email',
+    '/api/auth/sign-in/email',
+  ]);
+  assert.equal(calls.every((call) => call.options.credentials === 'same-origin'), true);
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    name: 'Ada',
+    email: 'ada@example.com',
+    password: 'secure-password',
+  });
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    email: 'ada@example.com',
+    password: 'secure-password',
+    rememberMe: true,
+  });
+});
+
 test('community repository factory selects PostgreSQL without browser database credentials', () => {
   const repo = createCommunityRepository({ backend: 'postgres', fetch: async () => response({}) });
 

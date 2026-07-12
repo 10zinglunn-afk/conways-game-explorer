@@ -19,7 +19,7 @@
 | Authorization + counter tests | API/auth/repository unit coverage is added. Historical Supabase pgTAP remains reference; cross-owner and counter behavior still need a disposable PostgreSQL run. |
 | Cloud repository implementation | Better Auth, migration runner, parameterized PostgreSQL repository, API routes, and browser proxy are implemented; live contract remains pending a disposable database. |
 | Durable Dev Studio workflow | Implemented locally: existing projects append immutable versions, restore creates a new version, metadata/lifecycle actions are available, and debounced crash recovery preserves unsaved board settings. |
-| Browser auth UI + shared-action gating | Done: magic-link controls, sign-out fallback to local mode, local-to-cloud migration on sign-in, and publish/star/clone gating |
+| Browser auth UI + shared-action gating | Done: email-and-password controls, sign-out fallback to local mode, local-to-cloud migration on sign-in, and publish/star/clone gating |
 | Next.js migration + public SSR pages | Not started (Phase 3) |
 
 The local-first build is the product scaffold. It is not real auth or
@@ -74,7 +74,7 @@ Two tiers, so frictionless local play and RLS-protected shared data coexist:
 - **Local tier (no auth):** anyone can build and save to localStorage with the
   current email+name profile. No publishing to the shared community.
 - **Cloud tier (Supabase Auth):** publishing, starring, and cloning *shared*
-  creations require sign-in (email magic link; GitHub OAuth optional). The
+  creations require sign-in (email and password; GitHub OAuth optional). The
   `profiles` row is keyed by `auth.users.id`, which every RLS policy keys on via
   `auth.uid()`.
 
@@ -215,7 +215,7 @@ Phase 2 proof.
 4. Implement `createSupabaseCommunityRepository`; pass the contract suite. **Done**: profile/atomic-save/publish/star/clone/trending/auth-helper slices pass, the shared repository contract runs against the Supabase implementation via a fake Supabase client, cloned remixes hydrate their own version rows, returning signed-in users hydrate profile/build/version/star state, and the live harness passed 8/8 against the linked hosted project on 2026-06-30.
 5. Wire env-based config selection. **Done**: repository selection supports `client` or `supabaseUrl` + `supabaseAnonKey` + `createClient`, `server.mjs` injects safe runtime config into `index.html`, and the browser reads the inline `life-runtime-config` JSON tag.
 6. Implement and test `migrateLocalState`. **Done**: migrates profile + creations, publishes public builds, returns ID remaps, and clears local state only after cloud writes succeed.
-7. Add auth UI (magic link) gating publish/star/clone. **Done**.
+7. Add auth UI (email and password) gating publish/star/clone. **Done**.
 8. Hydrate cloud state after sign-in/migration. **Done in repository/app unit coverage**: activation reloads the cloud profile, owned builds, current versions, and current-user star state before rendering.
 
 ---
