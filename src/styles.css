@@ -3072,3 +3072,598 @@ input[type='range'] {
     min-height: 118px;
   }
 }
+
+/* Readability pass: calm laboratory chrome, with the simulation as the focal point. */
+:root {
+  --bg: #071521;
+  --panel: rgba(10, 29, 42, 0.94);
+  --panel-strong: #0e2231;
+  --border: rgba(143, 166, 185, 0.22);
+  --border-strong: rgba(143, 166, 185, 0.45);
+  --text: #e3edf5;
+  --muted: #9db2c3;
+  --faint: #6f899d;
+  --accent: #34c6b4;
+  --accent-strong: #22b7a7;
+  --blue: #73c7ec;
+  --arcade-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+html,
+body {
+  background:
+    radial-gradient(circle at 48% 44%, rgba(27, 91, 111, 0.12), transparent 38%),
+    #071521;
+}
+
+button,
+input,
+textarea,
+select {
+  border-radius: 8px;
+}
+
+button {
+  border-color: var(--border);
+  background: rgba(18, 42, 59, 0.8);
+  font-weight: 650;
+}
+
+button:hover {
+  border-color: rgba(52, 198, 180, 0.65);
+  background: rgba(25, 57, 75, 0.94);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline-color: #48d9c8;
+  outline-offset: 3px;
+}
+
+/* The stripe/font treatment made labels unreadable; use one clear type system instead. */
+.arcade-rail h1,
+.workspace-dock button span:not(.button-icon),
+.transport button span:not(.button-icon),
+.transport-tempo label span,
+.panel-header h2,
+.collapsible-panel > summary h2,
+.preset-name,
+.tutorial-copy h2,
+.intro-title {
+  color: var(--text);
+  background-image: none;
+  font-family: var(--arcade-font);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  -webkit-text-fill-color: currentColor;
+  text-transform: none;
+}
+
+.intro-layer {
+  background:
+    radial-gradient(circle at 50% 45%, rgba(52, 198, 180, 0.12), transparent 32%),
+    #071521;
+}
+
+.intro-layer::before {
+  inset: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.intro-layer::after {
+  background:
+    linear-gradient(rgba(92, 149, 169, 0.085) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(92, 149, 169, 0.085) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+
+.intro-chrome {
+  width: min(560px, calc(100vw - 40px));
+  gap: 18px;
+  padding-top: 0;
+}
+
+.intro-scanline {
+  display: none;
+}
+
+.intro-entry {
+  width: 100%;
+  gap: 20px;
+  padding: 32px;
+  border: 1px solid rgba(115, 199, 236, 0.3);
+  border-radius: 16px;
+  background: rgba(10, 29, 42, 0.94);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+}
+
+.intro-title {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.08;
+  text-align: center;
+  text-shadow: none;
+}
+
+.intro-help {
+  max-width: 40ch;
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--arcade-font);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.55;
+  text-align: center;
+  text-shadow: none;
+  text-transform: none;
+}
+
+.intro-actions {
+  grid-template-columns: 1fr 1fr;
+}
+
+.intro-start,
+.intro-skip {
+  min-height: 52px;
+  border-radius: 9px;
+  font-family: var(--arcade-font);
+  font-size: 15px;
+  font-weight: 720;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.intro-start {
+  border-color: #53d9ca;
+  color: #06201f;
+  background: #48cec0;
+  box-shadow: none;
+}
+
+.intro-start:hover {
+  border-color: #7ae8dc;
+  background: #61dbce;
+}
+
+.intro-skip {
+  border-color: rgba(115, 199, 236, 0.42);
+  color: #d8eaf4;
+  background: rgba(18, 42, 59, 0.9);
+}
+
+.arcade-rail {
+  top: 20px;
+  bottom: 20px;
+  left: 20px;
+  z-index: 3;
+  width: 226px;
+  gap: 24px;
+  padding: 22px 14px;
+  border: 1px solid rgba(115, 199, 236, 0.2);
+  border-radius: 14px;
+  background: rgba(8, 25, 37, 0.9);
+  box-shadow: var(--shadow);
+}
+
+.arcade-rail .brand {
+  gap: 0;
+  padding: 2px 8px 16px;
+  border-bottom: 1px solid rgba(143, 166, 185, 0.16);
+}
+
+.arcade-rail h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 19px;
+  line-height: 1.18;
+}
+
+.arcade-rail .brand p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-dock {
+  order: 2;
+  gap: 5px;
+  margin-top: 0;
+}
+
+.workspace-dock button {
+  grid-template-columns: 26px minmax(0, 1fr);
+  min-height: 48px;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--arcade-font);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.workspace-dock button::before {
+  display: none;
+}
+
+.workspace-dock .button-icon {
+  display: inline-flex;
+  grid-row: auto;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 17px;
+}
+
+.workspace-dock button span:not(.button-icon) {
+  align-self: center;
+}
+
+.workspace-dock small {
+  display: none;
+}
+
+.workspace-dock button.active {
+  border-color: rgba(52, 198, 180, 0.22);
+  background: rgba(52, 198, 180, 0.12);
+  color: #d7fbf5;
+}
+
+.workspace-dock button.active .button-icon {
+  color: #4ad7c7;
+}
+
+.player-card {
+  order: 3;
+  gap: 4px;
+  margin-top: auto;
+  padding: 14px 10px 2px;
+  border: 0;
+  border-top: 1px solid rgba(143, 166, 185, 0.16);
+  border-radius: 0;
+  background: transparent;
+}
+
+.player-card span,
+.rail-block h2 {
+  color: var(--faint);
+  font-family: var(--arcade-font);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.player-card strong {
+  font-size: 14px;
+}
+
+.transport-block {
+  top: 20px;
+  z-index: 4;
+  width: min(700px, calc(100vw - 648px));
+  min-width: 470px;
+  padding: 10px 12px;
+  border: 1px solid rgba(115, 199, 236, 0.22);
+  border-radius: 12px;
+  background: rgba(10, 29, 42, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.transport-block,
+.transport-tempo,
+.transport-tempo label,
+.transport button,
+.tempo-stepper button {
+  font-family: var(--arcade-font);
+}
+
+.transport {
+  gap: 6px;
+}
+
+.transport button {
+  min-height: 40px;
+  padding: 0 11px;
+  font-size: 13px;
+  font-weight: 650;
+  text-transform: none;
+}
+
+.transport .primary {
+  border-color: #55d8ca;
+  color: #06201f;
+  background: #48cec0;
+  box-shadow: none;
+}
+
+.transport-tempo {
+  border-color: rgba(143, 166, 185, 0.18);
+}
+
+.transport-tempo label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.transport-tempo strong {
+  color: #91e7dd;
+}
+
+.tempo-stepper button {
+  border-color: rgba(143, 166, 185, 0.25);
+  color: var(--text);
+  font-size: 17px;
+}
+
+.tempo-stepper input {
+  accent-color: #48cec0;
+}
+
+.panel {
+  top: 20px;
+  right: 20px;
+  bottom: 20px;
+  width: 342px;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(115, 199, 236, 0.22);
+  border-radius: 14px;
+  background: rgba(10, 29, 42, 0.94);
+  box-shadow: var(--shadow);
+}
+
+.playground-mode .panel,
+.dev-active-mode .panel {
+  top: 20px;
+  right: 20px;
+  bottom: 20px;
+  width: 342px;
+  border-radius: 14px;
+  background: rgba(10, 29, 42, 0.94);
+}
+
+.panel-header {
+  min-height: 40px;
+  padding: 3px 6px 10px;
+  border-color: rgba(143, 166, 185, 0.18);
+}
+
+.panel-header h2 {
+  font-size: 15px;
+}
+
+.drawer-close,
+.tool-drawer-toggle {
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(18, 42, 59, 0.95);
+  font-family: var(--arcade-font);
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: none;
+}
+
+.tool-drawer-toggle {
+  top: 20px;
+  right: 20px;
+  z-index: 6;
+  border-color: rgba(115, 199, 236, 0.3);
+  box-shadow: var(--shadow);
+}
+
+.tool-drawer-toggle.active {
+  display: none;
+}
+
+.panel-section,
+.playground-mode .panel-section,
+.dev-active-mode .dev-command-strip,
+.dev-active-mode .dev-inspector,
+.dev-active-mode .dev-design-panel {
+  border-color: rgba(143, 166, 185, 0.17);
+  border-radius: 10px;
+  background: rgba(7, 21, 33, 0.56);
+}
+
+.collapsible-panel > summary {
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--text);
+  font-family: var(--arcade-font);
+  font-weight: 650;
+  text-transform: none;
+}
+
+.collapsible-panel > summary::after {
+  width: 22px;
+  height: 22px;
+  border-color: rgba(143, 166, 185, 0.28);
+  border-radius: 6px;
+  color: var(--muted);
+  background: rgba(18, 42, 59, 0.7);
+}
+
+.hint,
+.community-card span,
+.community-card p,
+.community-empty {
+  color: var(--muted);
+}
+
+.segmented button.active,
+.pattern-tab.active {
+  border-color: rgba(72, 206, 192, 0.62);
+  background: rgba(52, 198, 180, 0.16);
+  color: #d7fbf5;
+}
+
+.dev-design-panel label,
+.inspector-block label,
+.community-form label,
+.comment-box label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.dev-design-panel input,
+.dev-design-panel textarea,
+.community-form input,
+.community-form textarea,
+.inspector-block select,
+.inspector-block input[type='number'],
+.community-stream input,
+.community-stream select,
+.comment-box textarea {
+  border-color: rgba(143, 166, 185, 0.22);
+  border-radius: 7px;
+  background: rgba(5, 17, 28, 0.75);
+}
+
+.dev-lifecycle-actions .danger,
+.danger {
+  border-color: rgba(244, 114, 114, 0.52);
+  background: rgba(127, 29, 29, 0.35);
+}
+
+.playground-tutorial {
+  background: rgba(4, 14, 23, 0.72);
+}
+
+.tutorial-arcade-screen {
+  border: 1px solid rgba(115, 199, 236, 0.32);
+  border-radius: 16px;
+  background: #0a1d2a;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.4);
+}
+
+.tutorial-actions button,
+.tutorial-copy h2,
+#playground-tutorial-kicker {
+  font-family: var(--arcade-font);
+  text-transform: none;
+}
+
+.tutorial-actions .primary {
+  border-color: #55d8ca;
+  color: #06201f;
+  background: #48cec0;
+}
+
+@media (max-width: 980px) {
+  .arcade-rail {
+    width: 204px;
+  }
+
+  .transport-block {
+    grid-template-columns: 1fr;
+    width: min(500px, calc(100vw - 250px));
+    min-width: 0;
+  }
+
+  .transport-tempo {
+    padding: 8px 0 0;
+    border-top: 1px solid rgba(143, 166, 185, 0.18);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .intro-entry {
+    padding: 24px;
+  }
+
+  .intro-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .arcade-rail {
+    top: 10px;
+    right: 10px;
+    bottom: auto;
+    left: 10px;
+    width: auto;
+    min-height: 54px;
+    padding: 6px;
+    border-radius: 10px;
+  }
+
+  .arcade-rail .brand,
+  .player-card {
+    display: none;
+  }
+
+  .workspace-dock {
+    grid-template-columns: repeat(3, 1fr);
+    width: 100%;
+  }
+
+  .workspace-dock button {
+    display: grid;
+    grid-template-columns: 1fr;
+    min-height: 42px;
+    padding: 6px 4px;
+    place-items: center;
+    font-size: 12px;
+  }
+
+  .workspace-dock .button-icon {
+    display: none;
+  }
+
+  .transport-block {
+    top: 76px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+    min-width: 0;
+    transform: none;
+  }
+
+  .transport {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .panel,
+  .playground-mode .panel,
+  .dev-active-mode .panel {
+    top: 190px;
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    width: auto;
+    border-radius: 10px;
+  }
+
+  .dev-mode .panel,
+  .community-mode .panel {
+    top: 76px;
+  }
+
+  /* A true bottom sheet keeps the drawing area touchable on a phone. */
+  .playground-mode .panel,
+  .dev-active-mode .panel {
+    top: auto;
+    max-height: 36vh;
+  }
+
+  .tool-drawer-toggle,
+  .tools-collapsed.playground-mode .tool-drawer-toggle,
+  .tools-collapsed.dev-active-mode .tool-drawer-toggle {
+    top: 280px;
+    right: 10px;
+  }
+}

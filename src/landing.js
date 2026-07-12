@@ -11,7 +11,7 @@ const introPanelCopies = {
     title: 'Choose Mode',
     primaryAction: 'Playground',
     secondaryAction: 'Develop',
-    help: 'Play now, or create a builder card for Dev Studio.',
+    help: 'Explore the rules, then build a pattern of your own.',
     showProfileFields: false,
   },
   profile: {
@@ -22,10 +22,10 @@ const introPanelCopies = {
     showProfileFields: true,
   },
   loading: {
-    title: 'Conway Arcade',
+    title: "Conway's Game of Life",
     primaryAction: 'Loading',
     secondaryAction: 'Develop',
-    help: 'Stand by.',
+    help: 'Preparing your workspace…',
     showProfileFields: false,
   },
 };
