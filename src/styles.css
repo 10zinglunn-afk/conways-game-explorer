@@ -3902,3 +3902,42 @@ select:focus-visible {
 
 .selection-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
 .selection-controls button { min-height: 44px; white-space: normal; }
+
+/* Keep workspace content below navigation and preserve readable pattern geometry. */
+.dev-start-mode .panel { top: 84px; left: 20px; right: 20px; bottom: 20px; width: auto; }
+.preset-topline { display: grid; gap: 4px; }
+.preset-name, .preset-meta, .preset-note { white-space: normal; overflow-wrap: anywhere; }
+.preset-meta { font-size: 9px; }
+.pattern-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pattern-tab { padding-inline: 5px; white-space: normal; }
+.community-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.community-actions button { white-space: normal; }
+.preview-grid {
+  width: min(calc(100% - 10px), calc(42px * var(--preview-cols) / var(--preview-rows)));
+  height: auto;
+  aspect-ratio: var(--preview-cols) / var(--preview-rows);
+  gap: 0;
+}
+.preview-grid span { min-width: 0; min-height: 0; box-shadow: none; }
+.community-preview, .detail-preview { background: #07090f; }
+.comment-box[hidden] { display: none; }
+.detail-preview .preview-grid {
+  width: min(92%, calc(118px * var(--preview-cols) / var(--preview-rows)));
+  height: auto;
+}
+.dev-publish-preview .preview-grid {
+  width: min(92%, calc(104px * var(--preview-cols) / var(--preview-rows)));
+  height: auto;
+}
+@media (max-width: 620px) {
+  .dev-start-mode .panel { top: 76px; left: 10px; right: 10px; bottom: 10px; }
+  .transport-block { padding: 8px; gap: 6px; }
+  .transport { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+  .transport button { min-height: 40px; padding: 0 2px; font-size: 10px; white-space: normal; }
+  .transport .button-icon { display: none; }
+  .transport-tempo { grid-template-columns: 100px minmax(0, 1fr); padding: 4px 0 0; gap: 8px; }
+  .transport-tempo label { gap: 4px; }
+  .tool-drawer-toggle,
+  .tools-collapsed.playground-mode .tool-drawer-toggle,
+  .tools-collapsed.dev-active-mode .tool-drawer-toggle { top: 238px; }
+}

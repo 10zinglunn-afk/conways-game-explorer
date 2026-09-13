@@ -51,7 +51,7 @@ test('dev project mode shows the blank board with universal tools available', ()
 test('community cards describe editable copies instead of mutating the shared source', () => {
   assert.deepEqual(getCommunityActionCopy(), {
     play: 'Play',
-    edit: 'Edit Clone',
+    edit: 'Remix',
     star: 'Star',
     share: 'Share',
   });

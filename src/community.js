@@ -401,11 +401,11 @@ function normalizePreviewFrame(frame, pattern, bounds) {
 }
 
 function getPreviewGridSize(frame) {
-  const aspect = frame.width / frame.height;
-  if (aspect >= 1.5) {
-    return { columns: 24, rows: Math.max(5, Math.min(16, Math.round(24 / aspect))) };
-  }
-  return { columns: Math.max(6, Math.min(24, Math.round(16 * aspect))), rows: 16 };
+  // Downsample large boards, but never pull neighboring cells apart by
+  // upscaling a small pattern into a larger, mostly empty grid.
+  const scale = Math.min(1, 24 / frame.width, 16 / frame.height);
+  return { columns: Math.max(1, Math.round(frame.width * scale)),
+    rows: Math.max(1, Math.round(frame.height * scale)) };
 }
 
 function normalizePreviewColor(value, fallback) {

@@ -182,6 +182,8 @@ test('generates a deterministic framed preview with accessible fallback text', (
   assert.equal(first.version, 1);
   assert.equal(first.camera.mode, 'fit-pattern');
   assert.equal(first.cells.length, 5);
+  assert.deepEqual(first.grid, { columns: 3, rows: 3 });
+  assert.deepEqual(first.cells, [[1, 0], [2, 1], [0, 2], [1, 2], [2, 2]]);
   assert.deepEqual(first.colors, { background: '#112233', live: '#abcdef' });
   assert.match(first.altText, /Preview of Preview Glider: 5 live cells/);
 });

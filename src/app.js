@@ -246,6 +246,7 @@ const elements = {
   communityFilterOptions: document.querySelectorAll('[data-community-filter-value]'),
   communityDetail: document.querySelector('#community-detail'),
   commentBody: document.querySelector('#comment-body'),
+  commentBox: document.querySelector('.comment-box'),
   postComment: document.querySelector('#post-comment'),
   speedStepButtons: document.querySelectorAll('[data-speed-step]'),
   zoomStepButtons: document.querySelectorAll('[data-zoom-step]'),
@@ -2337,8 +2338,7 @@ function setMode(mode) {
       ? getActiveDesignStatusText()
       : 'Dev Studio: create a new design or project to open a blank board.';
     if (!communityState.profile && devStartMode) {
-      elements.devOutput.textContent = 'Create a profile to save drafts, publish designs, and keep remix lineage.';
-      window.setTimeout(() => elements.profileName?.focus({ preventScroll: true }), 80);
+      elements.devOutput.textContent = 'Drafts save on this device. Sign in when you want to publish or sync them.';
     }
   } else if (communityMode) {
     if (state.playing) {
@@ -2385,6 +2385,7 @@ async function openPublicCreationRoute(identifier) {
   setMode('community');
   state.communityRenderEpoch = (state.communityRenderEpoch || 0) + 1;
   elements.communityDetail.innerHTML = '<p class="community-state" role="status">Loading creation…</p>';
+  elements.commentBox.hidden = true;
   try {
     let creation = findCommunityDesign(identifier);
     if (!creation && communityAuth.cloudRepo?.getPublicCreation) creation = await communityAuth.cloudRepo.getPublicCreation(identifier);
@@ -2408,6 +2409,7 @@ async function openCreatorRoute(username, { updateHistory = true } = {}) {
   setMode('community');
   state.communityRenderEpoch = (state.communityRenderEpoch || 0) + 1;
   elements.communityDetail.innerHTML = '<p class="community-state" role="status">Loading creator…</p>';
+  elements.commentBox.hidden = true;
   try {
     if (!communityAuth.cloudRepo?.getPublicProfile) throw Object.assign(new Error('Creator profiles require the configured Community service.'), { status: 503 });
     const profile = await communityAuth.cloudRepo.getPublicProfile(username);
@@ -2546,6 +2548,10 @@ function runDevClaim(claim) {
 }
 
 async function saveLocalProfile() {
+  if (communityAuth.cloudConfigured && !isCloudSignedIn()) {
+    openAccountDialog({ mode: 'sign-up', context: 'Create an account to sync your designs. Device drafts stay available.' });
+    return;
+  }
   const email = elements.profileEmail.value;
   const displayName = elements.profileName.value;
 
@@ -2935,6 +2941,11 @@ async function renderCommunity() {
   } else {
     elements.saveProfile.textContent = isCloudCommunityActive() ? 'Create Profile' : 'Create Account';
   }
+  const needsAccount = communityAuth.cloudConfigured && !isCloudSignedIn();
+  for (const field of [elements.profileName, elements.profileEmail]) {
+    field.hidden = needsAccount;
+    document.querySelector(`label[for="${field.id}"]`).hidden = needsAccount;
+  }
 
   elements.communityCount.textContent = `${communityState.creations.length} builds`;
   renderDevStudio();
@@ -3031,7 +3042,7 @@ function renderDevStudio() {
   if (elements.devProfileMeta) {
     elements.devProfileMeta.textContent = profile
       ? `${profile.email || profile.username} · ${creations.length} saved designs`
-      : 'Create a profile to track designs.';
+      : 'Drafts save on this device. Sign in to sync and publish.';
   }
   if (elements.devDesignCount) elements.devDesignCount.textContent = creations.length;
   if (elements.devDraftCount) elements.devDraftCount.textContent = drafts.length;
@@ -3179,14 +3190,14 @@ function renderCommunityList(container, creations, emptyText, { source }) {
       </button>
       <div>
         <strong>${escapeHtml(creation.title)}</strong>
-        <span>${creation.visibility === 'public' ? 'Published' : 'Draft'} by ${escapeHtml(creation.ownerName)}</span>
+        <span>${creation.id.startsWith('famous-') ? 'Preset · source: ' : `${creation.visibility === 'public' ? 'Published' : 'Draft'} by `}${escapeHtml(creation.ownerName)}</span>
       </div>
       <p>${escapeHtml(creation.description || 'No description yet.')}</p>
       <div class="community-tags">${creation.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
       <div class="community-stats">
-        <span>${creation.starCount || 0} stars</span>
+        ${creation.id.startsWith('famous-') ? '<span>Library preset</span>' : `<span>${creation.starCount || 0} stars</span>
         <span>${creation.commentCount || getCommunityComments(creation).length} comments</span>
-        <span>${creation.cloneCount || 0} remixes</span>
+        <span>${creation.cloneCount || 0} remixes</span>`}
         <span>${creation.currentVersion?.population || 0} cells</span>
       </div>
       <div class="community-actions">
@@ -3234,48 +3245,36 @@ function getFamousCommunityDesigns() {
       title: 'Glider',
       description: 'The smallest spaceship and the hello-world of Life motion.',
       tags: ['spaceship', 'starter', 'famous'],
-      stars: 128,
-      clones: 38,
     },
     {
       id: 'gosper-gun',
       title: 'Gosper glider gun',
       description: 'The first known gun: a repeating source that emits gliders.',
       tags: ['gun', 'glider', 'classic'],
-      stars: 342,
-      clones: 91,
     },
     {
       id: 'pulsar',
       title: 'Pulsar',
       description: 'A symmetric period-3 oscillator with a readable rhythm.',
       tags: ['oscillator', 'period-3', 'starter'],
-      stars: 210,
-      clones: 44,
     },
     {
       id: 'r-pentomino',
       title: 'R-pentomino',
       description: 'A tiny methuselah that stays chaotic for a surprisingly long time.',
       tags: ['methuselah', 'chaos', 'famous'],
-      stars: 186,
-      clones: 27,
     },
     {
       id: 'acorn',
       title: 'Acorn',
       description: 'Seven cells that create a long-lived, expansive sequence.',
       tags: ['methuselah', 'growth', 'classic'],
-      stars: 174,
-      clones: 31,
     },
     {
       id: 'diehard',
       title: 'Diehard',
       description: 'A finite pattern famous for living a long time before disappearing.',
       tags: ['methuselah', 'extinction', 'classic'],
-      stars: 149,
-      clones: 23,
     },
   ];
 
@@ -3293,9 +3292,9 @@ function getFamousCommunityDesigns() {
       ownerName: 'LifeWiki',
       thumbnail: '',
       tags: entry.tags,
-      starCount: entry.stars,
-      cloneCount: entry.clones,
-      viewCount: entry.stars * 10,
+      starCount: 0,
+      cloneCount: 0,
+      viewCount: 0,
       commentCount: getCommunityComments({ id: `famous-${entry.id}` }).length,
       comments: [],
       starredBy: [],
@@ -3338,6 +3337,8 @@ function getCommunityComments(creation) {
 
 function renderCommunityDetail(creation) {
   if (!elements.communityDetail) return;
+  const isPreset = creation?.id.startsWith('famous-');
+  elements.commentBox.hidden = !creation || isPreset;
 
   if (!creation) {
     elements.communityDetail.innerHTML = '<p class="community-empty">Select a design to inspect, copy, comment, or remix.</p>';
@@ -3354,24 +3355,23 @@ function renderCommunityDetail(creation) {
     <div class="detail-preview" role="img" aria-label="${escapeHtml(getCreationPreviewAltText(creation))}">${getCommunityPreviewHtml(creation)}</div>
     <div class="section-heading">
       <h2>${escapeHtml(creation.title)}</h2>
-      <span>${creation.starCount || 0} stars</span>
+      <span>${creation.id.startsWith('famous-') ? 'Library preset' : `${creation.starCount || 0} stars`}</span>
     </div>
     <p>${escapeHtml(creation.description || 'No description yet.')}</p>
     <div class="community-tags">${(creation.tags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
     <dl class="detail-stats">
-      <div><dt>Author</dt><dd><button class="creator-link" type="button" data-community-action="creator" data-username="${escapeHtml(creation.ownerUsername || '')}">${escapeHtml(creation.ownerName)}</button></dd></div>
+      <div><dt>${isPreset ? 'Source' : 'Author'}</dt><dd>${creation.ownerUsername ? `<button class="creator-link" type="button" data-community-action="creator" data-username="${escapeHtml(creation.ownerUsername)}">${escapeHtml(creation.ownerName)}</button>` : escapeHtml(creation.ownerName)}</dd></div>
       <div><dt>Grid</dt><dd>${creation.currentVersion?.width || 0} x ${creation.currentVersion?.height || 0}</dd></div>
       <div><dt>Cells</dt><dd>${creation.currentVersion?.population || 0}</dd></div>
       <div><dt>Lineage</dt><dd>${escapeHtml(lineage)}</dd></div>
     </dl>
     <div class="community-actions detail-actions">
       <button type="button" data-community-action="play-copy" data-creation-id="${creation.id}">${actionCopy.play}</button>
-      <button type="button" data-community-action="edit-copy" data-creation-id="${creation.id}">${actionCopy.edit}</button>
       <button type="button" data-community-action="copy" data-creation-id="${creation.id}">${actionCopy.share}</button>
       <button type="button" data-community-action="remix" data-creation-id="${creation.id}">Remix</button>
-      <button type="button" data-community-action="report" data-creation-id="${creation.id}">Report</button>
+      ${creation.id.startsWith('famous-') ? '' : `<button type="button" data-community-action="report" data-creation-id="${creation.id}">Report</button>`}
     </div>
-    <div class="comments-list">
+    ${isPreset ? '<p class="community-empty">Remix this preset to publish your own version and start a discussion.</p>' : `<div class="comments-list">
       <h3>Comments ${comments.length}</h3>
       ${comments.length === 0
     ? '<p class="community-empty">No comments yet.</p>'
@@ -3381,7 +3381,7 @@ function renderCommunityDetail(creation) {
             <p>${escapeHtml(comment.body)}</p>
           </article>
         `).join('')}
-    </div>
+    </div>`}
   `;
 }
 
@@ -3417,7 +3417,7 @@ async function handleCommunityAction(event) {
   }
 
   if (communityAction === 'edit-copy') {
-    await editCommunityClone(creationId);
+    await remixCommunityDesign(creationId);
     return;
   }
 

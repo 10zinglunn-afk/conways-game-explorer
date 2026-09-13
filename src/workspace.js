@@ -48,7 +48,7 @@ export function getWorkspacePresentation(mode, { devProjectActive = false } = {}
 export function getCommunityActionCopy() {
   return {
     play: 'Play',
-    edit: 'Edit Clone',
+    edit: 'Remix',
     star: 'Star',
     share: 'Share',
   };
