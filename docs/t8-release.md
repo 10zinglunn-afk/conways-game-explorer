@@ -16,6 +16,8 @@ https://conways-game-explorer.10zinglunn.workers.dev.
   `2026-09-13T00:17:04.636Z`.
 - Final Worker version: `c88e2698-d13f-42c9-838b-a9e82a438452`, receiving
   100% of production traffic.
+- Release implementation commit: `3f29cf7` (`feat: launch Life Lab community
+  experience`).
 - Prior rollback Worker version: `88256033-e4f4-4679-ba0a-618c90be87ab`.
 - An initial T8 version, `c2f4a4a0-e55d-424b-8c64-eb9249bf231d`, exposed a
   live-only homepage routing defect and was immediately superseded. Adding `/`
