@@ -36,9 +36,20 @@ test('clamps invalid custom dimensions and color values', () => {
   });
 
   assert.equal(settings.width, 40);
-  assert.equal(settings.height, 600);
+  assert.equal(settings.height, 2000);
   assert.equal(settings.backgroundColor, '#07090f');
   assert.equal(settings.liveCellColor, '#123456');
+});
+
+test('clamps custom dimensions above the supported 2048-cell edge', () => {
+  const settings = createDesignSettings({
+    gridPreset: 'custom',
+    width: 2049,
+    height: 9000,
+  });
+
+  assert.equal(settings.width, 2048);
+  assert.equal(settings.height, 2048);
 });
 
 test('preset grid dimensions use named Dev Studio sizes', () => {

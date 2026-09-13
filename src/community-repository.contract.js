@@ -8,6 +8,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 const SAMPLE_RLE = 'x = 1, y = 1, rule = B3/S23\no!';
+const PUBLISH_METADATA = {
+  description: 'A complete community build used to verify publishing.',
+  tags: ['test-build'],
+};
 
 export function runCommunityRepositoryContract(label, makeRepo) {
   const fresh = async () => {
@@ -34,6 +38,15 @@ export function runCommunityRepositoryContract(label, makeRepo) {
     assert.equal(draft.visibility, 'private');
     assert.equal(repo.getState().activeCreationId, draft.id);
     assert.equal(repo.findCreation(draft.id).id, draft.id);
+  });
+
+  test(`[${label}] same-title creations receive deterministic owner-scoped slugs`, async () => {
+    const repo = await withProfile();
+    const first = await repo.createCreation({ title: 'Glider Clock', rle: SAMPLE_RLE });
+    const second = await repo.createCreation({ title: 'Glider Clock', rle: SAMPLE_RLE });
+
+    assert.equal(first.slug, 'glider-clock');
+    assert.equal(second.slug, 'glider-clock-2');
   });
 
   test(`[${label}] createCreation and saveVersion keep one project with immutable snapshots`, async () => {
@@ -99,7 +112,7 @@ export function runCommunityRepositoryContract(label, makeRepo) {
 
   test(`[${label}] unpublish, archive, and delete enforce the project lifecycle`, async () => {
     const repo = await withProfile();
-    const creation = await repo.createCreation({ title: 'Lifecycle', rle: SAMPLE_RLE }, { publish: true });
+    const creation = await repo.createCreation({ title: 'Lifecycle', rle: SAMPLE_RLE, ...PUBLISH_METADATA }, { publish: true });
     const unpublished = await repo.unpublishCreation(creation.id);
     const archived = await repo.archiveCreation(creation.id);
 
@@ -135,17 +148,41 @@ export function runCommunityRepositoryContract(label, makeRepo) {
 
   test(`[${label}] saveCreation with publish flag publishes immediately`, async () => {
     const repo = await withProfile();
-    const creation = await repo.saveCreation({ title: 'Block', rle: SAMPLE_RLE }, { publish: true });
+    const creation = await repo.saveCreation({ title: 'Block', rle: SAMPLE_RLE, ...PUBLISH_METADATA }, { publish: true });
     assert.equal(creation.visibility, 'public');
     assert.ok(creation.publishedAt);
+    assert.equal(creation.canonicalUrl, '/c/block');
+    assert.equal(creation.previewConfig.version, 1);
+    assert.match(creation.previewConfig.altText, /Preview of Block/);
+    assert.equal(creation.publishReadiness.preview, true);
   });
 
   test(`[${label}] publishCreation publishes an existing draft by id`, async () => {
     const repo = await withProfile();
-    const draft = await repo.saveCreation({ title: 'Draft', rle: SAMPLE_RLE });
+    const draft = await repo.saveCreation({ title: 'Draft', rle: SAMPLE_RLE, ...PUBLISH_METADATA });
     const published = await repo.publishCreation(draft.id);
     assert.equal(published.visibility, 'public');
+    assert.equal(published.canonicalUrl, '/c/draft');
+    assert.equal(published.previewConfig.cells.length, 1);
     assert.equal(repo.findCreation(draft.id).visibility, 'public');
+  });
+
+  test(`[${label}] publishing rejects incomplete metadata and empty boards`, async () => {
+    const repo = await withProfile();
+    const draft = await repo.saveCreation({
+      title: 'Incomplete',
+      description: 'Too short',
+      rle: 'x = 0, y = 0, rule = B3/S23\n!',
+    });
+
+    await assert.rejects(() => repo.publishCreation(draft.id), { name: 'PublishValidationError' });
+    assert.equal(repo.findCreation(draft.id).visibility, 'private');
+    await assert.rejects(() => repo.createCreation({
+      title: 'Too many tags',
+      description: PUBLISH_METADATA.description,
+      tags: Array.from({ length: 9 }, (_, index) => `tag-${index + 1}`),
+      rle: SAMPLE_RLE,
+    }, { publish: true }), { name: 'PublishValidationError' });
   });
 
   test(`[${label}] publishCreation returns null for an unknown id`, async () => {
@@ -155,7 +192,7 @@ export function runCommunityRepositoryContract(label, makeRepo) {
 
   test(`[${label}] toggleStar stars and unstars per profile`, async () => {
     const repo = await withProfile();
-    const draft = await repo.saveCreation({ title: 'Build', rle: SAMPLE_RLE }, { publish: true });
+    const draft = await repo.saveCreation({ title: 'Build', rle: SAMPLE_RLE, ...PUBLISH_METADATA }, { publish: true });
     let starred = await repo.toggleStar(draft.id, 'profile-a');
     assert.equal(starred.starCount, 1);
     starred = await repo.toggleStar(draft.id, 'profile-a');
@@ -168,6 +205,7 @@ export function runCommunityRepositoryContract(label, makeRepo) {
     const source = await repo.saveCreation({
       title: 'Signal Gate',
       rle: SAMPLE_RLE,
+      ...PUBLISH_METADATA,
       settings: {
         liveCellColor: '#22c55e',
         wrapping: false,
@@ -185,7 +223,7 @@ export function runCommunityRepositoryContract(label, makeRepo) {
   test(`[${label}] listTrendingCreations returns only published creations`, async () => {
     const repo = await withProfile();
     await repo.saveCreation({ title: 'Private', rle: SAMPLE_RLE });
-    const published = await repo.saveCreation({ title: 'Public', rle: SAMPLE_RLE }, { publish: true });
+    const published = await repo.saveCreation({ title: 'Public', rle: SAMPLE_RLE, ...PUBLISH_METADATA }, { publish: true });
     const trending = await repo.listTrendingCreations();
     assert.deepEqual(trending.map((creation) => creation.id), [published.id]);
   });

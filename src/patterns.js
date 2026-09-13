@@ -56,58 +56,95 @@ export function getPresetGroup(groups, groupId) {
   return groups.find((group) => group.id === groupId) ?? null;
 }
 
-export function parseRle(input) {
-  const lines = input
-    .split(/\r?\n/)
+export const RLE_LIMITS = Object.freeze({
+  dimensionMax: 2048,
+  textBytesMax: 5_000_000,
+  coordinateCollectionMax: 200_000,
+});
+
+export function parseRle(input, {
+  preserveOrigin = false,
+  maxCoordinates = RLE_LIMITS.coordinateCollectionMax,
+} = {}) {
+  const coordinates = [];
+  const parsed = scanRle(input, {
+    maxCoordinates,
+    onLiveCell(x, y) { coordinates.push([x, y]); },
+  });
+  return {
+    ...parsed,
+    coordinates: preserveOrigin ? coordinates : normalizeCoordinates(coordinates),
+  };
+}
+
+// Direct board decoders use this scanner instead of parseRle(), so a valid
+// dense 2048×2048 import never first becomes millions of [x, y] arrays.
+export function forEachRleCell(input, onLiveCell, options = {}) {
+  if (typeof onLiveCell !== 'function') throw new Error('RLE cell callback is required.');
+  return scanRle(input, { ...options, maxCoordinates: null, onLiveCell });
+}
+
+function scanRle(input, {
+  onLiveCell = null,
+  maxCoordinates = RLE_LIMITS.coordinateCollectionMax,
+} = {}) {
+  if (typeof input !== 'string') throw new Error('RLE must be text.');
+  if (new TextEncoder().encode(input).byteLength > RLE_LIMITS.textBytesMax) {
+    throw new Error('RLE must be text under 5 MB.');
+  }
+  const lines = input.split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#'));
+  if (!lines.length) throw new Error('RLE is missing a header like "x = 3, y = 3".');
 
-  const headerIndex = lines.findIndex((line) => /x\s*=/.test(line) && /y\s*=/.test(line));
-
-  if (headerIndex === -1) {
-    throw new Error('RLE is missing a header like "x = 3, y = 3".');
-  }
-
-  const header = lines[headerIndex];
-  const width = readHeaderNumber(header, 'x');
-  const height = readHeaderNumber(header, 'y');
-  const body = lines.slice(headerIndex + 1).join('').replace(/\s/g, '');
-  const coordinates = [];
+  const { width, height, rule } = readHeader(lines[0]);
+  if (rule && rule.toUpperCase() !== 'B3/S23') throw new Error('This lab runs Conway’s B3/S23 rule.');
+  const body = lines.slice(1).join('').replace(/\s/g, '');
   let x = 0;
   let y = 0;
   let run = '';
+  let liveCount = 0;
+  let terminated = false;
 
   for (const token of body) {
+    if (terminated) throw new Error('RLE contains data after its terminator.');
     if (/\d/.test(token)) {
       run += token;
       continue;
     }
-
+    if (token === '!') {
+      if (run) throw new Error('RLE run length must be followed by a cell token.');
+      terminated = true;
+      continue;
+    }
     const count = run ? Number(run) : 1;
     run = '';
-
+    if (!Number.isSafeInteger(count) || count < 1 || count > width * height + height + width + 1) {
+      throw new Error('Invalid RLE run length.');
+    }
     if (token === 'b') {
+      if (y >= height || x + count > width) throw new Error('RLE cells exceed the declared board.');
       x += count;
     } else if (token === 'o') {
-      for (let i = 0; i < count; i += 1) {
-        coordinates.push([x + i, y]);
+      if (y >= height || x + count > width || liveCount + count > width * height) {
+        throw new Error('RLE cells exceed the declared board.');
       }
+      if (Number.isFinite(maxCoordinates) && liveCount + count > maxCoordinates) {
+        throw new Error(`RLE has more than ${maxCoordinates.toLocaleString()} cells for a coordinate pattern.`);
+      }
+      for (let i = 0; i < count; i += 1) onLiveCell?.(x + i, y);
+      liveCount += count;
       x += count;
     } else if (token === '$') {
+      if (y + count > height) throw new Error('RLE rows exceed the declared board.');
       y += count;
       x = 0;
-    } else if (token === '!') {
-      break;
     } else {
       throw new Error(`Unsupported RLE token: ${token}`);
     }
   }
-
-  return {
-    width,
-    height,
-    coordinates: normalizeCoordinates(coordinates),
-  };
+  if (!terminated) throw new Error('RLE is missing its ! terminator.');
+  return { width, height, rule: 'B3/S23', population: liveCount };
 }
 
 export function encodeRle(coordinates) {
@@ -138,20 +175,24 @@ export function encodeRle(coordinates) {
     }
 
     row += encodeRun(run, current);
-    rows.push(row.replace(/b+$/, ''));
+    // `encodeRun` emits a numeric prefix (for example `298b`), so trimming
+    // only the trailing letter leaves a bare run length before `$`/`!`.
+    rows.push(row.replace(/(?:\d+)?b$/, ''));
   }
 
   return `x = ${bounds.width}, y = ${bounds.height}, rule = B3/S23\n${rows.join('$')}!`;
 }
 
-function readHeaderNumber(header, key) {
-  const match = header.match(new RegExp(`${key}\\s*=\\s*(\\d+)`));
-
-  if (!match) {
-    throw new Error(`RLE header is missing ${key}.`);
+function readHeader(header) {
+  const match = header.match(/^x\s*=\s*(\d+)\s*,\s*y\s*=\s*(\d+)(?:\s*,\s*rule\s*=\s*([^,\s]+))?$/i);
+  if (!match) throw new Error('RLE is missing a valid x/y header.');
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height)
+    || width < 0 || height < 0 || width > RLE_LIMITS.dimensionMax || height > RLE_LIMITS.dimensionMax) {
+    throw new Error('RLE dimensions must be between 0 and 2048.');
   }
-
-  return Number(match[1]);
+  return { width, height, rule: match[3] || 'B3/S23' };
 }
 
 function encodeRun(run, token) {

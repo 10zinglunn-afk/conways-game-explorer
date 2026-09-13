@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   encodeRle,
+  forEachRleCell,
   getPatternBounds,
   getPresetGroup,
   normalizeCoordinates,
@@ -81,6 +82,27 @@ test('encodes coordinates as compact RLE', () => {
     [1, 2],
     [2, 2],
   ]), 'x = 3, y = 3, rule = B3/S23\nbo$2bo$3o!');
+});
+
+test('rejects truncated, overflowing, malformed, and trailing RLE data', () => {
+  for (const input of [
+    'x = 3, y = 3\nbo$2bo$3o',
+    'x = 3, y = 3\n4o!',
+    'x = 3, y = 3\n4$!',
+    'x = 3, y = 3\nbo!o',
+    'x = 3, y = 3, rule = B36/S23\n!',
+    'x = nope, y = 3\n!',
+    'x = 3, y = 3\n2!',
+  ]) {
+    assert.throws(() => parseRle(input));
+  }
+});
+
+test('streams live cells without collecting a coordinate pattern', () => {
+  const seen = [];
+  const parsed = forEachRleCell('x = 4, y = 3, rule = B3/S23\n2o2b$4b$bo!', (x, y) => seen.push([x, y]));
+  assert.equal(parsed.population, 3);
+  assert.deepEqual(seen, [[0, 0], [1, 0], [1, 2]]);
 });
 
 test('preset groups cover each preset once for library tabs', () => {

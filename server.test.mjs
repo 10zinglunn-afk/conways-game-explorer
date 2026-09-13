@@ -94,3 +94,16 @@ test('Hyperdrive runtime config exposes only same-origin API paths', async () =>
   assert.doesNotMatch(writes[1].body, /postgres:\/\//);
   assert.doesNotMatch(writes[1].body, /do-not-expose-this/);
 });
+
+test('canonical app and public routes return the SPA shell on direct request', async () => {
+  const handler = createRequestHandler({ env: {}, auth: null, databasePool: null, authHandler: null });
+  for (const url of ['/studio', '/community/favorites', '/c/famous-glider', '/u/ada']) {
+    const writes = [];
+    await handler({ url, method: 'GET', headers: {} }, {
+      writeHead(status, headers) { writes.push({ status, headers }); },
+      end(body) { writes.push({ body }); },
+    });
+    assert.equal(writes[0].status, 200, url);
+    assert.match(String(writes[1].body), /id="community-panel"/, url);
+  }
+});

@@ -79,5 +79,6 @@ test('Better Auth enables password accounts without an email delivery provider',
     minPasswordLength: 12,
     maxPasswordLength: 128,
   });
+  assert.equal(auth.options.user.deleteUser.enabled, true);
   assert.equal(auth.options.plugins.some((plugin) => plugin.id === 'magic-link'), false);
 });

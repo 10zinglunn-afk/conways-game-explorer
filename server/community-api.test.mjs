@@ -51,6 +51,21 @@ test('community API reports invalid JSON as a client error', async () => {
   assert.match(response.body, /valid JSON/);
 });
 
+test('Node adapter compares mutations with the forwarded public origin', async () => {
+  const response = createResponse();
+  await handleCommunityRequest({
+    request: requestWithBody('/api/community/profile', '{}', {
+      host: 'internal:5173', 'x-forwarded-host': 'life.example', 'x-forwarded-proto': 'https',
+      origin: 'https://life.example', 'content-type': 'application/json',
+    }),
+    response,
+    pool: { connect() {} },
+    auth: { api: { async getSession() { return null; } } },
+  });
+  assert.equal(response.status, 401);
+  assert.equal(JSON.parse(response.body).code, 'AUTH_REQUIRED');
+});
+
 function createResponse() {
   return {
     status: null,

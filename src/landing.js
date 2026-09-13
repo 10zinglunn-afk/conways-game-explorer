@@ -201,12 +201,23 @@ export function mountLandingIntro({
   onPlayground = null,
   onDevelop = null,
   onComplete = () => {},
+  direct = false,
   now = () => performance.now(),
   raf = (callback) => requestAnimationFrame(callback),
 } = {}) {
   if (!layer || !canvas || !prompt) {
     onComplete();
     return { start: () => {}, destroy: () => {} };
+  }
+
+  // The rules animation remains available as a replayable affordance, but it
+  // must never hold the first editable workspace behind an asynchronous gate.
+  if (direct) {
+    layer.classList.add('intro-layer--complete');
+    layer.hidden = true;
+    onPlayground?.();
+    onComplete('playground');
+    return { start: () => onPlayground?.(), destroy: () => {} };
   }
 
   const ctx = canvas.getContext('2d', { alpha: true });

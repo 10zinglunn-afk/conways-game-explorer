@@ -60,8 +60,8 @@
         <div class="brand">
           <span class="brand-mark" aria-hidden="true"></span>
           <div>
-            <h1>Conway's Game</h1>
-            <p>Explore cellular systems</p>
+            <h1>Life Lab</h1>
+            <p>Conway’s Game of Life</p>
           </div>
         </div>
 
@@ -89,6 +89,8 @@
           </button>
         </nav>
 
+        <button id="account-entry" class="account-entry" type="button">Account</button>
+
       </aside>
 
       <section class="rail-block transport-block" aria-label="Simulation controls">
@@ -109,6 +111,11 @@
             <span class="button-icon" aria-hidden="true">✦</span>
             <span>Soup</span>
           </button>
+          <button id="undo" type="button" aria-label="Undo last edit">Undo</button>
+          <button id="redo" type="button" aria-label="Redo last edit">Redo</button>
+          <button id="reset-start" type="button" aria-label="Reset to saved starting state">Reset</button>
+          <button id="promote-state" type="button" aria-label="Use the current frame as the saved starting state">Use as start</button>
+          <button id="fit-board" type="button" aria-label="Fit board to view">Fit</button>
         </div>
         <div class="transport-tempo" aria-label="Tempo controls">
           <label for="speed">
@@ -152,8 +159,20 @@
               <span class="button-icon" aria-hidden="true">▣</span>
               <span data-stamp-label>Stamp</span>
             </button>
+            <button type="button" data-tool="select" role="radio" aria-checked="false">Select</button>
           </div>
           <p class="hint">Draw paints or erases paused live cells. Pan moves the board. Stamp places repeated copies.</p>
+          <div class="selection-controls" role="group" aria-label="Selection controls">
+            <button type="button" data-selection-command="copy">Copy</button>
+            <button type="button" data-selection-command="paste">Paste</button>
+            <button type="button" data-selection-command="rotate">Rotate selection</button>
+            <button type="button" data-selection-command="reflect">Reflect selection</button>
+            <button type="button" data-selection-command="left" aria-label="Move selection left">←</button>
+            <button type="button" data-selection-command="up" aria-label="Move selection up">↑</button>
+            <button type="button" data-selection-command="down" aria-label="Move selection down">↓</button>
+            <button type="button" data-selection-command="right" aria-label="Move selection right">→</button>
+            <button type="button" data-selection-command="clear">Deselect</button>
+          </div>
           <p id="stamp-summary" class="stamp-summary" hidden></p>
           <button id="stamp-off" class="stamp-off" type="button" hidden>Turn Stamp Off</button>
           <div class="stamp-controls" aria-label="Stamp transform controls">
@@ -216,6 +235,16 @@
               <textarea id="dev-design-attribution" rows="2" placeholder="Credit a source or inspiration"></textarea>
               <label for="dev-design-tutorial">Tutorial reference</label>
               <input id="dev-design-tutorial" type="text" placeholder="Optional tutorial URL or identifier" />
+              <div class="dev-preview-heading">
+                <span>Default camera preview</span>
+                <output id="dev-preview-mode">Fit pattern</output>
+              </div>
+              <div id="dev-preview" class="dev-publish-preview" role="img" aria-label="Add live cells to generate a publishing preview"></div>
+              <p id="dev-preview-description" class="field-help">The published card will frame all live cells.</p>
+              <div class="button-row dev-preview-actions" aria-label="Default camera framing">
+                <button id="preview-fit-pattern" type="button" aria-pressed="true">Fit Pattern</button>
+                <button id="preview-use-view" type="button" aria-pressed="false">Use Current View</button>
+              </div>
               <div class="button-row">
                 <button id="save-design" type="button">Save Draft</button>
                 <button id="publish-design" type="button">Publish</button>
@@ -244,11 +273,8 @@
                 <button type="button" data-dev-component="eater"><span>Stop</span><small>absorbs signal</small></button>
                 <button type="button" data-dev-component="collision-pair"><span>Collide</span><small>two signals</small></button>
               </div>
-              <div class="logic-grid" aria-label="Logic demos">
-                <button type="button" data-dev-demo="and">AND demo</button>
-                <button type="button" data-dev-demo="or">OR demo</button>
-                <button type="button" data-dev-demo="xor">XOR demo</button>
-                <button type="button" data-dev-demo="adder">Adder plan</button>
+              <div id="circuit-experiments" class="logic-grid" aria-label="Verified circuit experiments">
+                <p class="hint">Verified finite-signal experiments. Toggle inputs, then run until the marked output settles.</p>
               </div>
               <div class="dev-actions" aria-label="Claim checks">
                 <button type="button" data-dev-claim="period">Check period</button>
@@ -386,6 +412,7 @@
                     <button type="button" role="option" data-community-filter-value="trending" aria-selected="false">Trending</button>
                     <button type="button" role="option" data-community-filter-value="new" aria-selected="false">New</button>
                     <button type="button" role="option" data-community-filter-value="remixes" aria-selected="false">Remixes</button>
+                    <button type="button" role="option" data-community-filter-value="favorites" aria-selected="false">Favorites</button>
                   </div>
                 </div>
                 <select id="community-filter" class="sr-only" aria-label="Community feed filter" tabindex="-1">
@@ -394,6 +421,7 @@
                   <option value="trending">Trending</option>
                   <option value="new">New</option>
                   <option value="remixes">Remixes</option>
+                  <option value="favorites">Favorites</option>
                 </select>
               </div>
               <div class="community-list-block">
@@ -471,6 +499,37 @@
         </details>
 
       </aside>
+
+      <dialog id="account-dialog" class="account-dialog" aria-labelledby="account-dialog-title">
+        <form method="dialog" class="account-dialog-card">
+          <div class="account-dialog-heading">
+            <div><span class="eyebrow">Life Lab account</span><h2 id="account-dialog-title">Keep building</h2></div>
+            <button id="account-close" value="cancel" type="submit" aria-label="Close account dialog">×</button>
+          </div>
+          <p id="account-context">Sign in without leaving your current workspace.</p>
+          <div id="account-tabs" class="account-tabs" role="tablist" aria-label="Account action">
+            <button type="button" data-account-mode="sign-in" role="tab" aria-selected="true">Sign in</button>
+            <button type="button" data-account-mode="sign-up" role="tab" aria-selected="false">Create account</button>
+            <button type="button" data-account-mode="recover" role="tab" aria-selected="false">Recover</button>
+          </div>
+          <div id="account-fields" class="account-fields">
+            <label data-account-field="name">Display name<input id="account-name" type="text" autocomplete="name" /></label>
+            <label>Email<input id="account-email" type="email" autocomplete="email" /></label>
+            <label data-account-field="recovery">Recovery key<input id="account-recovery-key" type="text" autocomplete="off" /></label>
+            <label>Password<input id="account-password" type="password" minlength="12" maxlength="128" autocomplete="current-password" /></label>
+          </div>
+          <p id="account-output" class="account-output" role="status">Passwords must contain 12 to 128 characters.</p>
+          <output id="account-recovery-output" class="account-recovery-output" hidden></output>
+          <button id="account-submit" class="primary" type="button">Sign in</button>
+          <section id="account-security" class="account-security" hidden>
+            <h3>Security</h3>
+            <p>Recovery keys are shown once. Life Lab cannot email a recovery key.</p>
+            <button id="account-create-recovery" type="button">Generate recovery key</button>
+            <label>Type DELETE to confirm<input id="account-delete-confirmation" type="text" autocomplete="off" /></label>
+            <button id="account-delete" class="danger" type="button">Delete account and publications</button>
+          </section>
+        </form>
+      </dialog>
 
       <div class="hud" aria-live="polite">
         <span id="active-note">Blank board ready. Draw cells, drag in a pattern, then press Play.</span>

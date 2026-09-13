@@ -8,8 +8,10 @@
 // churn through the app.
 import {
   COMMUNITY_STORAGE_KEY,
+  assertCreationPublishReady,
   createCommunityState,
   createCreationDraft,
+  createOwnerScopedSlug,
   createCreationVersion,
   createProfile,
   getTrendingCreations,
@@ -27,6 +29,8 @@ import {
   toggleStar as applyStarToggle,
   cloneCreation as buildRemix,
 } from './community.js';
+import { migrateGuestProjects } from './guest-import.js';
+import { localTransaction } from './local-database.js';
 
 // Backend selection (plan 2.5). Default is local; `supabase` is reserved for the
 // Phase 2 implementation and throws a clear error until it exists and is
@@ -72,6 +76,9 @@ export function createPostgresCommunityRepository({
   const communityRequest = (path, options) => request(apiBase, path, options);
   const authRequest = (path, options) => request(authBase, path, options);
   const createCreation = async (input, { publish = false } = {}) => {
+    if (publish) {
+      assertCreationPublishReady({ ...input, currentVersion: { rle: input?.rle } });
+    }
     const creation = await communityRequest('/creations', {
       method: 'POST',
       body: { ...input, publish },
@@ -121,6 +128,12 @@ export function createPostgresCommunityRepository({
       return null;
     },
 
+    async deleteAccount(password) {
+      await authRequest('/delete-user', { method: 'POST', body: { password } });
+      state = createCommunityState();
+      return true;
+    },
+
     onAuthStateChange() {
       // Better Auth is cookie-based here. The client refreshes /get-session
       // immediately after an auth action and again on the next page load.
@@ -136,6 +149,71 @@ export function createPostgresCommunityRepository({
       const profile = await communityRequest('/profile', { method: 'POST', body: input });
       state = { ...state, profile };
       return profile;
+    },
+
+    startImport(input) {
+      return communityRequest('/imports', { method: 'POST', body: input });
+    },
+
+    putImportManifest(importId, batch, input) {
+      return communityRequest(`/imports/${encodeURIComponent(importId)}/manifest/${encodeURIComponent(batch)}`, {
+        method: 'PUT', body: input,
+      });
+    },
+
+    putImportVersion(importId, localVersionId, input) {
+      return communityRequest(`/imports/${encodeURIComponent(importId)}/versions/${encodeURIComponent(localVersionId)}`, {
+        method: 'PUT', body: input,
+      });
+    },
+
+    async completeImport(importId) {
+      const result = await communityRequest(`/imports/${encodeURIComponent(importId)}/complete`, {
+        method: 'POST', body: {},
+      });
+      if (result?.creation) remember(result.creation);
+      return result;
+    },
+
+    listPublicCreations(query = {}) {
+      return communityRequest(`/feed?${new URLSearchParams(query)}`);
+    },
+
+    getPublicCreation(identifier) {
+      return communityRequest(`/public/${encodeURIComponent(identifier)}`);
+    },
+
+    listPublicComments(identifier, cursor = '') {
+      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+      return communityRequest(`/public/${encodeURIComponent(identifier)}/comments${query}`);
+    },
+
+    getPublicProfile(username, cursor = '') {
+      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+      return communityRequest(`/profiles/${encodeURIComponent(username)}${query}`);
+    },
+
+    getPatternFavorites() { return communityRequest('/favorites'); },
+    setPatternFavorite(patternId, saved) {
+      return communityRequest('/favorites', { method: 'POST', body: { patternId, saved } });
+    },
+    createComment(creationId, body) {
+      return communityRequest('/comments', { method: 'POST', body: { creationId, body } });
+    },
+    updateComment(commentId, body) {
+      return communityRequest(`/comments/${encodeURIComponent(commentId)}`, { method: 'PATCH', body: { body } });
+    },
+    deleteComment(commentId) {
+      return communityRequest(`/comments/${encodeURIComponent(commentId)}`, { method: 'DELETE' });
+    },
+    reportCreation(creationId, reason) {
+      return communityRequest('/reports', { method: 'POST', body: { creationId, reason } });
+    },
+    createRecoveryKey(password) {
+      return communityRequest('/recovery-key', { method: 'POST', body: { password } });
+    },
+    recoverAccount(input) {
+      return communityRequest('/recover', { method: 'POST', body: input });
     },
 
     createCreation,
@@ -239,12 +317,27 @@ export function createPostgresCommunityRepository({
   };
 }
 
-export async function migrateLocalState(localRepo, cloudRepo) {
+export async function migrateLocalState(localRepo, cloudRepo, options = {}) {
   if (!localRepo || !cloudRepo) {
     throw new Error('Both local and cloud community repositories are required.');
   }
 
   const localState = await localRepo.loadCommunityState();
+
+  if (typeof cloudRepo.startImport === 'function'
+    && typeof localRepo.captureImportSnapshot === 'function'
+    && typeof localRepo.commitImportedSnapshot === 'function') {
+    const profile = localState.profile ? await cloudRepo.saveProfile(toProfileInput(localState.profile)) : null;
+    const staged = await migrateGuestProjects(localRepo, cloudRepo, options);
+    return {
+      profile,
+      creationMap: Object.fromEntries(staged.results.map((result) => [result.mapping?.localProjectId, result.mapping?.cloudProjectId])),
+      versionMaps: Object.fromEntries(staged.results.map((result) => [result.mapping?.localProjectId, result.mapping?.versionIds || {}])),
+      migratedCreations: staged.migratedCreations,
+      cleared: staged.results.every((result) => result.localRemoved),
+      results: staged.results,
+    };
+  }
   const creationMap = {};
   const migratedCreations = [];
 
@@ -356,10 +449,20 @@ export function createSupabaseCommunityRepository({
     if (!state.profile) {
       throw new Error('Create a Supabase profile before saving creations.');
     }
+    if (publish) {
+      assertCreationPublishReady({ ...input, currentVersion: { rle: input?.rle } });
+    }
 
+    const slug = createOwnerScopedSlug(
+      input?.title,
+      state.creations
+        .filter((creation) => creation.ownerId === state.profile.id)
+        .map((creation) => creation.slug),
+    );
     const draft = createCreationDraft({
       ...input,
       id: createId(),
+      slug,
       profile: state.profile,
       now,
     });
@@ -576,13 +679,15 @@ export function createSupabaseCommunityRepository({
       const existing = find(creationId);
       if (!existing) return null;
 
-      const publishedAt = existing.publishedAt || now();
+      const published = applyPublish(existing, { now });
       const { data, error } = await client
         .from('creations')
         .update({
           visibility: 'public',
-          published_at: publishedAt,
-          updated_at: publishedAt,
+          published_at: published.publishedAt,
+          preview_config: published.previewConfig,
+          publish_readiness: published.publishReadiness,
+          updated_at: published.updatedAt,
         })
         .eq('id', creationId)
         .select()
@@ -896,6 +1001,7 @@ function fromCreationRow(row, {
     id: row.id,
     title: row.title,
     slug: row.slug,
+    canonicalUrl: row.visibility === 'public' ? `/c/${row.slug}` : null,
     description: row.description || '',
     attribution: row.attribution || '',
     tutorialReference: row.tutorial_reference || '',
@@ -968,7 +1074,12 @@ async function requestJson(fetchImpl, url, { method = 'GET', body } = {}) {
   const text = await response.text();
   const data = text ? parseJsonResponse(text) : null;
   if (!response.ok) {
-    throw new Error(data?.error || `Community request failed (${response.status}).`);
+    throw Object.assign(new Error(data?.error || `Community request failed (${response.status}).`), {
+      status: response.status,
+      code: data?.code || null,
+      issues: data?.issues || null,
+      retryAfter: data?.retryAfter || null,
+    });
   }
   return data;
 }
@@ -985,15 +1096,32 @@ export function createLocalCommunityRepository({
   storage = globalThis.localStorage,
   key = COMMUNITY_STORAGE_KEY,
   now = () => new Date().toISOString(),
+  indexedDB = globalThis.indexedDB,
 } = {}) {
+  if (indexedDB) return createIndexedCommunityRepository({ storage, key, now, indexedDB });
   let state = readStoredState(storage, key);
+
+  const withRevision = (creation, previous = null) => ({
+    ...creation,
+    localRevision: Number(previous?.localRevision || creation?.localRevision || 0) + 1,
+    // An import key identifies one immutable captured revision. Reusing it
+    // after a local edit makes the server (correctly) reject changed content.
+    importKey: previous ? createUuid() : creation?.importKey || createUuid(),
+  });
 
   const persist = () => writeStoredState(state, storage, key);
   const find = (creationId) =>
     state.creations.find((creation) => creation.id === creationId) || null;
   const createCreation = async (input, { publish = false } = {}) => {
-    const draft = createCreationDraft({ ...input, profile: state.profile, now });
-    const creation = publish ? applyPublish(draft, { now }) : draft;
+    if (publish) {
+      assertCreationPublishReady({ ...input, currentVersion: { rle: input?.rle } });
+    }
+    const ownedSlugs = state.creations
+      .filter((creation) => creation.ownerId === state.profile?.id)
+      .map((creation) => creation.slug);
+    const slug = createOwnerScopedSlug(input?.title, ownedSlugs);
+    const draft = createCreationDraft({ ...input, slug, profile: state.profile, now });
+    const creation = withRevision(publish ? applyPublish(draft, { now }) : draft);
     state = {
       ...state,
       creations: replaceCreation(state.creations, creation),
@@ -1051,7 +1179,7 @@ export function createLocalCommunityRepository({
     async saveVersion(creationId, input) {
       const target = find(creationId);
       if (!target || target.archivedAt) return null;
-      const creation = appendCreationVersion(target, input, { now });
+      const creation = withRevision(appendCreationVersion(target, input, { now }), target);
       state = {
         ...state,
         creations: replaceCreation(state.creations, creation),
@@ -1064,7 +1192,7 @@ export function createLocalCommunityRepository({
     async updateCreationMetadata(creationId, patch) {
       const target = find(creationId);
       if (!target) return null;
-      const creation = applyMetadataUpdate(target, patch, { now });
+      const creation = withRevision(applyMetadataUpdate(target, patch, { now }), target);
       state = { ...state, creations: replaceCreation(state.creations, creation) };
       persist();
       return creation;
@@ -1084,7 +1212,7 @@ export function createLocalCommunityRepository({
     async restoreVersion(creationId, versionId) {
       const target = find(creationId);
       if (!target || target.archivedAt) return null;
-      const creation = applyRestoreVersion(target, versionId, { now });
+      const creation = withRevision(applyRestoreVersion(target, versionId, { now }), target);
       if (!creation) return null;
       state = {
         ...state,
@@ -1099,7 +1227,7 @@ export function createLocalCommunityRepository({
       const target = find(creationId);
       if (!target) return null;
 
-      const published = applyPublish(target, { now });
+      const published = withRevision(applyPublish(target, { now }), target);
       state = {
         ...state,
         creations: replaceCreation(state.creations, published),
@@ -1112,7 +1240,7 @@ export function createLocalCommunityRepository({
     async unpublishCreation(creationId) {
       const target = find(creationId);
       if (!target) return null;
-      const creation = applyUnpublish(target, { now });
+      const creation = withRevision(applyUnpublish(target, { now }), target);
       state = { ...state, creations: replaceCreation(state.creations, creation) };
       persist();
       return creation;
@@ -1121,7 +1249,7 @@ export function createLocalCommunityRepository({
     async archiveCreation(creationId) {
       const target = find(creationId);
       if (!target) return null;
-      const creation = applyArchive(target, { now });
+      const creation = withRevision(applyArchive(target, { now }), target);
       state = {
         ...state,
         creations: replaceCreation(state.creations, creation),
@@ -1189,7 +1317,105 @@ export function createLocalCommunityRepository({
       persist();
       return state;
     },
+
+    async captureImportSnapshot(creationId) {
+      const creation = find(creationId);
+      if (!creation) throw Object.assign(new Error('Local project was not found.'), { code: 'LOCAL_NOT_FOUND' });
+      const normalized = creation.localRevision && creation.importKey
+        ? creation
+        : { ...creation, localRevision: Number(creation.localRevision || 1), importKey: creation.importKey || createUuid() };
+      if (normalized !== creation) {
+        state = { ...state, creations: replaceCreation(state.creations, normalized) };
+        persist();
+      }
+      return structuredClone({ creation: normalized, revision: normalized.localRevision, importKey: normalized.importKey });
+    },
+
+    async commitImportedSnapshot(creationId, snapshot, mapping, { retain = false } = {}) {
+      // In-memory/storage adapter used by non-browser contract tests.
+      // Browsers use createIndexedCommunityRepository's atomic implementation.
+      const latest = readStoredState(storage, key);
+      const current = latest.creations.find((creation) => creation.id === creationId) || null;
+      const removed = Boolean(current
+        && current.localRevision === snapshot.revision
+        && current.importKey === snapshot.importKey);
+
+      const deleteLocal = !retain && removed;
+      state = {
+        ...latest,
+        creations: deleteLocal
+          ? latest.creations.filter((creation) => creation.id !== creationId)
+          : latest.creations,
+        activeCreationId: deleteLocal && latest.activeCreationId === creationId ? null : latest.activeCreationId,
+        importMappings: { ...(latest.importMappings || {}), [creationId]: mapping },
+      };
+      persist();
+      return { removed: deleteLocal, mapping };
+    },
   };
+}
+
+function createIndexedCommunityRepository({ storage, key, now, indexedDB }) {
+  let cache = readStoredState(storage, key);
+  let selectedId;
+  const transact = (action) => localTransaction(`${key}-projects-v2`, 'state', (stored) => {
+    const current = stored || readStoredState(storage, key);
+    const change = action(current);
+    return { ...change, result: Promise.resolve(change.result).then((result) => ({ result, state: change.value || current })) };
+  }, { indexedDB }).then(({ result, state }) => {
+    cache = { ...state, activeCreationId: selectedId === undefined ? state.activeCreationId : selectedId };
+    // The old storage is only a one-time migration source, never a live mirror.
+    try { storage.removeItem?.(key); } catch {}
+    return result;
+  });
+  const command = (method, args) => transact((current) => {
+    let serialized = JSON.stringify(current);
+    const memory = { getItem: () => serialized, setItem: (_key, value) => { serialized = value; } };
+    const repository = createLocalCommunityRepository({ storage: memory, key, now, indexedDB: null });
+    const result = repository[method](...args);
+    const value = { ...repository.getState(), importMappings: current.importMappings || {} };
+    return { value, result };
+  });
+  const api = {
+    backend: 'local', requiresAuth: false,
+    getState: () => cache,
+    findCreation: (id) => cache.creations.find((creation) => creation.id === id) || null,
+    setActiveCreation(id) {
+      selectedId = id;
+      cache = { ...cache, activeCreationId: id };
+      transact((current) => ({ value: { ...current, activeCreationId: id } })).catch(() => {});
+      return cache;
+    },
+    loadCommunityState: () => transact((current) => ({ value: current, result: current })),
+    getAuthSession: async () => null,
+    getAuthUser: async () => null,
+    signOut: async () => null,
+    sendMagicLink: async () => { throw new Error('Supabase backend is not configured for community auth.'); },
+    onAuthStateChange: createNoopAuthSubscription,
+    commitImportedSnapshot(id, snapshot, mapping, { retain = false } = {}) {
+      return transact((current) => {
+        const project = current.creations.find((creation) => creation.id === id);
+        const removed = Boolean(!retain && project && project.localRevision === snapshot.revision
+          && project.importKey === snapshot.importKey
+          && JSON.stringify(project) === JSON.stringify(snapshot.creation));
+        return {
+          value: { ...current,
+            creations: removed ? current.creations.filter((creation) => creation.id !== id) : current.creations,
+            activeCreationId: removed && current.activeCreationId === id ? null : current.activeCreationId,
+            importMappings: { ...current.importMappings, [id]: mapping },
+          },
+          result: { removed, mapping },
+        };
+      });
+    },
+  };
+  for (const method of ['saveProfile', 'createCreation', 'saveCreation', 'saveVersion',
+    'updateCreationMetadata', 'listVersions', 'loadVersion', 'restoreVersion',
+    'publishCreation', 'unpublishCreation', 'archiveCreation', 'deleteCreation',
+    'toggleStar', 'cloneCreation', 'listTrendingCreations', 'clearCommunityState', 'captureImportSnapshot']) {
+    api[method] = (...args) => command(method, args);
+  }
+  return api;
 }
 
 function createNoopAuthSubscription() {

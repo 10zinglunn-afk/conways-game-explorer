@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { createCommunityRepository, createSupabaseCommunityRepository } from './community-repository.js';
 import { runCommunityRepositoryContract } from './community-repository.contract.js';
 
+const PUBLISH_METADATA = {
+  description: 'A complete build used to verify community publishing.',
+  tags: ['test-build'],
+};
+
 runCommunityRepositoryContract('supabase', createContractSupabaseRepository);
 
 test('createCommunityRepository requires Supabase config for the supabase backend', () => {
@@ -177,7 +182,7 @@ test('saveCreation calls the atomic create_creation RPC and hydrates replay sett
 
 test('publishCreation marks a Supabase creation public and updates the cache', async () => {
   const { repo, client } = await createProfiledRepo();
-  const draft = await repo.saveCreation({ title: 'Draft', rle: 'x = 1, y = 1, rule = B3/S23\no!' });
+  const draft = await repo.saveCreation({ title: 'Draft', rle: 'x = 1, y = 1, rule = B3/S23\no!', ...PUBLISH_METADATA });
 
   const published = await repo.publishCreation(draft.id);
 
@@ -190,7 +195,9 @@ test('publishCreation marks a Supabase creation public and updates the cache', a
     payload: {
       visibility: 'public',
       published_at: '2026-06-29T12:00:00.000Z',
+      preview_config: published.previewConfig,
       updated_at: '2026-06-29T12:00:00.000Z',
+      publish_readiness: { metadata: true, board: true, preview: true },
     },
     eq: ['id', draft.id],
   });
@@ -198,7 +205,7 @@ test('publishCreation marks a Supabase creation public and updates the cache', a
 
 test('toggleStar inserts and deletes stars for the authenticated Supabase user', async () => {
   const { repo, client } = await createProfiledRepo();
-  const creation = await repo.saveCreation({ title: 'Signal', rle: 'x = 1, y = 1, rule = B3/S23\no!' }, { publish: true });
+  const creation = await repo.saveCreation({ title: 'Signal', rle: 'x = 1, y = 1, rule = B3/S23\no!', ...PUBLISH_METADATA }, { publish: true });
 
   const starred = await repo.toggleStar(creation.id, 'ignored-local-profile');
   const unstarred = await repo.toggleStar(creation.id, 'ignored-local-profile');
@@ -229,7 +236,7 @@ test('toggleStar inserts and deletes stars for the authenticated Supabase user',
 
 test('cloneCreation calls the clone RPC and caches the private remix', async () => {
   const { repo, client } = await createProfiledRepo();
-  const source = await repo.saveCreation({ title: 'Signal Gate', rle: 'x = 1, y = 1, rule = B3/S23\no!' }, { publish: true });
+  const source = await repo.saveCreation({ title: 'Signal Gate', rle: 'x = 1, y = 1, rule = B3/S23\no!', ...PUBLISH_METADATA }, { publish: true });
   const profile = repo.getState().profile;
 
   const remix = await repo.cloneCreation(source.id, profile);
@@ -260,6 +267,7 @@ test('loadCommunityState hydrates the authenticated profile, owned creations, ve
   const { repo, client } = await createProfiledRepo();
   const creation = await repo.saveCreation({
     title: 'Returning Build',
+    ...PUBLISH_METADATA,
     rle: 'x = 1, y = 1, rule = B3/S23\no!',
     width: 1,
     height: 1,
@@ -287,6 +295,7 @@ test('listTrendingCreations includes current-user star state for fresh Supabase 
   const { repo, client } = await createProfiledRepo();
   const creation = await repo.saveCreation({
     title: 'Starred Public Build',
+    ...PUBLISH_METADATA,
     rle: 'x = 1, y = 1, rule = B3/S23\no!',
   }, { publish: true });
   await repo.toggleStar(creation.id);
@@ -306,7 +315,7 @@ test('listTrendingCreations includes current-user star state for fresh Supabase 
 test('listTrendingCreations reads public creations from the Supabase trending view', async () => {
   const { repo, client } = await createProfiledRepo();
   await repo.saveCreation({ title: 'Private', rle: 'x = 1, y = 1, rule = B3/S23\no!' });
-  const published = await repo.saveCreation({ title: 'Public', rle: 'x = 1, y = 1, rule = B3/S23\no!' }, { publish: true });
+  const published = await repo.saveCreation({ title: 'Public', rle: 'x = 1, y = 1, rule = B3/S23\no!', ...PUBLISH_METADATA }, { publish: true });
 
   const trending = await repo.listTrendingCreations();
 

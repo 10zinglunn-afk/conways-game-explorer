@@ -15,9 +15,31 @@
   --faint: #64748b;
   --accent: #5eead4;
   --accent-strong: #2dd4bf;
+  --lime: #b7f34a;
   --blue: #38bdf8;
   --arcade-font: "Courier New", ui-monospace, SFMono-Regular, Menlo, monospace;
   --shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+}
+
+.intro-layer[hidden] { display: none !important; }
+
+.circuit-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: rgba(7, 9, 15, 0.56);
+}
+
+.circuit-card strong { color: var(--lime); font-family: var(--arcade-font); }
+.circuit-card p, .circuit-card output { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.circuit-ports { display: flex; gap: 12px; font: 12px var(--arcade-font); color: var(--accent); }
+.circuit-ports input { accent-color: var(--lime); }
+
+@media (max-width: 900px) {
+  .transport { flex-wrap: wrap; }
+  .transport button { min-height: 38px; }
+  .circuit-card { padding: 10px; }
 }
 
 * {
@@ -1582,6 +1604,8 @@ input[type='range'] {
     overflow: auto;
   }
 
+  .community-mode .panel { overflow: auto; }
+
   .dev-command-strip {
     justify-self: stretch;
   }
@@ -1641,6 +1665,36 @@ input[type='range'] {
   .community-actions.detail-actions {
     grid-template-columns: 1fr;
   }
+}
+
+/* Approved Life Lab workspace shell: one shared top header and a board-first
+   editor. These rules deliberately supersede the legacy arcade side dock. */
+@media (min-width: 621px) {
+  .arcade-rail {
+    top: 0; right: 0; bottom: auto; left: 0;
+    display: flex; align-items: center; gap: 48px;
+    width: auto; height: 70px; min-height: 70px; padding: 0 28px;
+    border-width: 0 0 1px; border-radius: 0;
+    background: rgba(7, 9, 15, .96);
+  }
+  .arcade-rail .brand { min-width: 210px; }
+  .arcade-rail h1 { font-size: 22px; }
+  .arcade-rail .brand p { display: none; }
+  .workspace-dock { display: flex !important; flex: 1; justify-content: center; gap: 18px; visibility: visible !important; opacity: 1 !important; }
+  .workspace-dock button { display: inline-flex !important; width: auto; min-height: 70px; padding: 0 14px; border: 0; border-radius: 0; background: transparent; color: var(--text); }
+  .workspace-dock button small, .workspace-dock .button-icon { display: none; }
+  .workspace-dock button.active { color: var(--lime); background: transparent; box-shadow: inset 0 -2px var(--lime); }
+  .player-card { order: 3; width: auto; min-width: 130px; margin: 0; padding: 0; border: 0; }
+  .transport-block { position: fixed !important; top: 84px; left: 344px !important; right: 22px !important; width: auto !important; min-width: 0; transform: none !important; }
+  .panel, .playground-mode .panel, .dev-active-mode .panel { top: 84px; right: auto; bottom: 20px; left: 20px; width: 304px; }
+  .tool-drawer-toggle { top: 84px; right: 20px; }
+  .community-mode .panel { top: 84px !important; right: 20px !important; bottom: 20px !important; left: 20px !important; width: auto !important; }
+}
+
+@media (max-width: 620px) {
+  .arcade-rail { position: fixed; }
+  .workspace-dock button { font-size: 11px; }
+  .transport-block { top: 70px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2526,18 +2580,69 @@ input[type='range'] {
   width: calc(100% - 10px);
   height: calc(100% - 10px);
   gap: 1px;
+  background: var(--preview-background, transparent);
 }
 
 .preview-grid span {
   min-width: 2px;
   min-height: 2px;
-  background: #fbbf24;
-  box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+  background: var(--preview-live, #fbbf24);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--preview-live, #fbbf24) 50%, transparent);
 }
 
 .detail-preview .preview-grid {
   width: min(92%, 320px);
   height: 118px;
+}
+
+.dev-preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  color: #cbd5e1;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.dev-preview-heading output {
+  color: #5eead4;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.dev-publish-preview {
+  display: grid;
+  place-items: center;
+  min-height: 132px;
+  overflow: hidden;
+  border: 1px solid rgba(94, 234, 212, 0.22);
+  border-radius: 12px;
+  background: rgba(3, 7, 18, 0.86);
+}
+
+.dev-publish-preview .preview-grid {
+  width: min(92%, 300px);
+  height: 104px;
+}
+
+.preview-empty,
+.field-help {
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+
+.dev-preview-actions button[aria-pressed="true"] {
+  border-color: rgba(94, 234, 212, 0.7);
+  background: rgba(20, 184, 166, 0.2);
+  color: #ccfbf1;
+}
+
+.field-help {
+  margin: -2px 0 2px;
+  line-height: 1.45;
 }
 
 @media (max-width: 980px) {
@@ -2756,6 +2861,51 @@ input[type='range'] {
   border: 0;
   background: transparent;
 }
+
+.account-entry {
+  min-height: 28px;
+  padding: 4px 9px;
+  border-color: rgba(94, 234, 212, .35);
+  color: var(--lime);
+  background: rgba(45, 212, 191, .08);
+}
+
+.account-dialog {
+  width: min(480px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  padding: 0;
+  border: 1px solid rgba(94, 234, 212, .34);
+  border-radius: 16px;
+  color: var(--text);
+  background: #0a1d2a;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, .62);
+}
+
+.account-dialog::backdrop { background: rgba(2, 8, 14, .78); backdrop-filter: blur(5px); }
+.account-dialog-card { display: grid; gap: 16px; padding: 24px; }
+.account-dialog-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.account-dialog-heading h2 { margin: 3px 0 0; font: 700 24px/1.15 var(--arcade-font); }
+.account-dialog-heading button { min-width: 38px; padding: 5px; font-size: 24px; }
+.account-dialog .eyebrow { color: var(--lime); font: 700 10px/1 var(--arcade-font); letter-spacing: .12em; text-transform: uppercase; }
+.account-dialog p { margin: 0; color: var(--muted); }
+.account-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.account-tabs button[aria-selected='true'] { border-color: var(--lime); color: var(--lime); background: rgba(94, 234, 212, .1); }
+.account-fields { display: grid; gap: 12px; }
+.account-fields label, .account-security label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.account-fields input, .account-security input { width: 100%; border-color: rgba(143, 166, 185, .28); background: #06131e; }
+.account-output.error { color: #fca5a5; }
+.account-output.success { color: var(--lime); }
+.account-security { display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid rgba(143, 166, 185, .2); }
+.account-security[hidden], .account-fields [hidden] { display: none; }
+.account-security h3 { margin: 0; }
+.account-security output { overflow-wrap: anywhere; padding: 12px; border: 1px dashed var(--lime); border-radius: 8px; color: var(--lime); background: rgba(94, 234, 212, .07); user-select: all; }
+.account-recovery-output { overflow-wrap: anywhere; padding: 12px; border: 1px dashed var(--lime); border-radius: 8px; color: var(--lime); background: rgba(94, 234, 212, .07); user-select: all; }
+.account-route-heading { display: flex; align-items: center; gap: 8px; }
+.account-route-heading button { padding: 5px 8px; }
+.community-state { padding: 18px; border: 1px dashed rgba(143,166,185,.25); border-radius: 10px; color: var(--muted); }
+.community-detail .creator-link { padding: 0; border: 0; color: var(--lime); background: none; text-decoration: underline; }
+.community-detail .report-box { display: grid; gap: 8px; margin-top: 14px; }
+.community-detail .report-box textarea { min-height: 70px; }
 
 .player-card span {
   color: rgba(251, 191, 36, 0.82);
@@ -3093,6 +3243,19 @@ input[type='range'] {
 
   .custom-select-menu {
     z-index: 20;
+  }
+
+  .community-layout {
+    display: block;
+    height: auto;
+    overflow: visible;
+  }
+
+  .community-sidebar,
+  .community-stream,
+  .community-detail {
+    margin-bottom: 12px;
+    overflow: visible;
   }
 
   .tutorial-arcade-screen {
@@ -3630,12 +3793,21 @@ select:focus-visible {
     min-height: 54px;
     padding: 6px;
     border-radius: 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
   }
 
   .arcade-rail .brand,
-  .player-card {
+  .player-card > span,
+  .player-card > strong,
+  .player-card > small {
     display: none;
   }
+
+  .account-entry { position: static; min-height: 42px; padding: 4px 9px; box-shadow: none; background: #0a1d2a; }
+  .account-dialog-card { padding: 18px; }
+  .account-tabs { grid-template-columns: 1fr; }
 
   .workspace-dock {
     grid-template-columns: repeat(3, 1fr);
@@ -3665,8 +3837,10 @@ select:focus-visible {
   }
 
   .transport {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+
+  .transport button { min-height: 36px; padding: 0 4px; font-size: 11px; }
 
   .panel,
   .playground-mode .panel,
@@ -3698,3 +3872,33 @@ select:focus-visible {
     right: 10px;
   }
 }
+
+/* Final layout lock for the approved Life Lab workspace shell. */
+@media (min-width: 621px) {
+  .arcade-rail { position: fixed !important; top: 0 !important; right: 0 !important; bottom: auto !important; left: 0 !important; display: flex !important; flex-direction: row !important; align-items: center !important; gap: 48px; width: auto !important; height: 70px !important; min-height: 70px; padding: 0 28px; border-width: 0 0 1px; border-radius: 0; background: rgba(7,9,15,.96); }
+  .arcade-rail .brand { min-width: 210px; }
+  .arcade-rail h1 { font-size: 22px; }
+  .arcade-rail .brand p { display: none; }
+  .workspace-dock { display: flex; flex: 1; justify-content: center; gap: 18px; }
+  .workspace-dock button { display: inline-flex; width: auto; min-height: 70px; padding: 0 14px; border: 0; border-radius: 0; background: transparent; }
+  .workspace-dock button small, .workspace-dock .button-icon { display: none; }
+  .workspace-dock button.active { color: var(--lime); background: transparent; box-shadow: inset 0 -2px var(--lime); }
+  .player-card { order: 3; width: auto; min-width: 130px; margin: 0; padding: 0; border: 0; }
+  .transport-block { top: 84px; left: 344px; right: 22px; width: auto; min-width: 0; }
+  .panel, .playground-mode .panel, .dev-active-mode .panel { top: 84px; right: auto; bottom: 20px; left: 20px; width: 304px; }
+  .tool-drawer-toggle { top: 84px; right: 20px; }
+}
+
+/* Pattern cards show the actual seed before it is stamped. */
+.preset { grid-template-columns: 72px minmax(0, 1fr); column-gap: 10px; align-items: center; }
+.preset-preview { grid-row: span 2; width: 72px; height: 48px; border: 1px solid rgba(94, 234, 212, .25); border-radius: 5px; image-rendering: pixelated; }
+.preset-topline, .preset-note { grid-column: 2; }
+
+@media (min-width: 621px) {
+  .transport-block { top: 78px; left: 344px; right: 22px; width: auto; max-width: 720px; padding: 7px; }
+  .transport { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 5px; }
+  .transport button { min-height: 34px; padding: 0 6px; font-size: 10px; }
+}
+
+.selection-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.selection-controls button { min-height: 44px; white-space: normal; }

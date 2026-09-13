@@ -121,6 +121,19 @@ unbuilt safety controls while preserving the intended final product.
 
 ## Phase 2 — Build the validated publishing workflow
 
+Implementation status (2026-07-12): the local implementation is complete.
+Shared client/server validation now requires complete metadata and a non-empty,
+bounded RLE; active repositories allocate deterministic owner-scoped slugs;
+publish retries preserve the original timestamp and `/c/[slug]`; the UI exposes
+explicit validation/publishing/success/failure/unpublished states; and
+`0002_publish_readiness.sql` prevents incomplete rows from becoming public.
+Dev Studio now lets builders fit the pattern or use the current view as the
+default camera, then persists a deterministic lightweight preview with theme
+colors and accessible fallback text. Community cards and details consume that
+same preview contract. Applying the migrations and running the repository/auth
+contract against a disposable PostgreSQL database remains the Phase 2
+verification gap.
+
 ### Publish readiness
 
 - Require a title, meaningful description, valid tags, and a non-empty board.

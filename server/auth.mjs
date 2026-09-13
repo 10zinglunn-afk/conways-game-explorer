@@ -81,6 +81,7 @@ export function createBetterAuth({
       },
     },
     user: {
+      deleteUser: { enabled: true },
       modelName: 'auth_users',
       fields: {
         emailVerified: 'email_verified',

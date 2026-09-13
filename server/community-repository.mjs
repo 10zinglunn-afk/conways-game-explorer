@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
   archiveCreation as applyArchive,
+  assertCreationPublishReady,
   createCommunityState,
   createCreationDraft,
   createCreationVersion,
+  createOwnerScopedSlug,
   createProfile,
   cloneCreation as buildRemix,
   publishCreation as applyPublish,
@@ -12,6 +14,7 @@ import {
   unpublishCreation as applyUnpublish,
   updateCreationMetadata as applyMetadataUpdate,
 } from '../src/community.js';
+import { validateVersionInput } from './version-validation.mjs';
 
 export function createPostgresCommunityRepository({
   pool,
@@ -29,17 +32,18 @@ export function createPostgresCommunityRepository({
 
   const loadCreation = async (client, creationId, { includeVersions = false, publicOnly = false } = {}) => {
     const visibilityClause = publicOnly
-      ? 'and c.visibility = \'public\' and c.archived_at is null'
+      ? 'and c.visibility = \'public\' and c.archived_at is null and c.moderation_status = \'visible\''
       : 'and (c.owner_id = $2 or (c.visibility = \'public\' and c.archived_at is null))';
-    const params = publicOnly ? [creationId] : [creationId, userId];
+    const params = [creationId, userId];
     const result = await client.query(`
-      select c.*, p.display_name as owner_name,
+      select c.*, p.display_name as owner_name, p.username as owner_username,
+             exists(select 1 from public.stars s where s.creation_id=c.id and s.profile_id=$2) as viewer_starred,
              v.id as version_id, v.version_number, v.rle, v.width, v.height,
              v.generation, v.population, v.rule, v.settings, v.parent_version_id,
              v.created_at as version_created_at
         from public.creations c
         left join public.profiles p on p.id = c.owner_id
-        left join public.creation_versions v on v.id = c.current_version_id
+        left join public.creation_versions v on v.id = ${publicOnly ? 'c.published_version_id' : 'c.current_version_id'}
        where c.id = $1 ${visibilityClause}
     `, params);
     if (!result.rows[0]) return null;
@@ -52,7 +56,7 @@ export function createPostgresCommunityRepository({
            order by version_number asc
         `, [creationId])).rows.map(fromVersionRow)
       : null;
-    return fromCreationRow(row, { versions });
+    return fromCreationRow(row, { versions, publicOnly, userId });
   };
 
   const loadOwnedCreation = (client, creationId, options = {}) => loadCreation(client, creationId, {
@@ -86,16 +90,35 @@ export function createPostgresCommunityRepository({
   };
 
   const createCreation = async (input, { publish = false } = {}) => {
-    if (!state.profile) throw new Error('Save a PostgreSQL profile before saving creations.');
+    if (!state.profile) {
+      const profile = await pool.query(
+        'select p.*, u.email from public.profiles p join public.auth_users u on u.id = p.id where p.id = $1',
+        [userId],
+      );
+      if (!profile.rows[0]) throw new Error('Saving requires a profile. Sign in again to finish account setup.');
+      state = { ...state, profile: fromProfileRow(profile.rows[0]) };
+    }
+    if (publish) {
+      assertCreationPublishReady({ ...input, currentVersion: { rle: input?.rle } });
+    }
     const id = createId();
-    const draft = createCreationDraft({ ...input, id, profile: state.profile, now });
-    const creation = publish ? applyPublish(draft, { now }) : draft;
-    const version = normalizeVersionForDatabase({
-      ...creation.currentVersion,
-      id: createId(),
-    });
 
     return remember(await withTransaction(async (client) => {
+      await client.query('select pg_advisory_xact_lock(hashtext($1))', [userId]);
+      if (input.importKey) {
+        const imported = await client.query('select id from public.creations where owner_id = $1 and import_key = $2',
+          [userId, String(input.importKey).slice(0, 200)]);
+        if (imported.rows[0]) return loadOwnedCreation(client, imported.rows[0].id, { includeVersions: true });
+      }
+      const slugRows = await client.query('select slug from public.creations');
+      const baseSlug = createOwnerScopedSlug(input?.title, slugRows.rows.map((row) => row.slug));
+      const slug = `${baseSlug.slice(0, 95)}-${id}`;
+      const draft = createCreationDraft({ ...input, id, slug, profile: state.profile, now });
+      const creation = publish ? applyPublish(draft, { now }) : draft;
+      const version = normalizeVersionForDatabase({
+        ...creation.currentVersion,
+        id: createId(),
+      });
       await client.query(`
         insert into public.creations (
           id, owner_id, slug, title, description, tags, attribution,
@@ -105,8 +128,8 @@ export function createPostgresCommunityRepository({
       `, [
         id, userId, creation.slug, creation.title, creation.description,
         creation.tags, creation.attribution, creation.tutorialReference,
-        creation.previewConfig, creation.publishReadiness, creation.visibility,
-        creation.remixedFromId, creation.rootCreationId, creation.publishedAt,
+        creation.previewConfig, {}, 'private', creation.remixedFromId,
+        creation.rootCreationId, null,
       ]);
       await client.query(`
         insert into public.creation_versions (
@@ -115,10 +138,17 @@ export function createPostgresCommunityRepository({
         ) values ($1,$2,1,$3,$4,$5,$6,$7,$8,$9)
       `, [version.id, id, version.rle, version.width, version.height,
         version.generation, version.population, version.rule, version.settings]);
-      await client.query(
-        'update public.creations set current_version_id = $1 where id = $2',
-        [version.id, id],
-      );
+      await client.query(`
+        update public.creations
+           set current_version_id = $1, visibility = $2, published_at = $3,
+               publish_readiness = $4, published_version_id = $7, published_metadata = $8
+         where id = $5 and owner_id = $6
+      `, [version.id, creation.visibility, creation.publishedAt,
+        creation.publishReadiness, id, userId,
+        publish ? version.id : null,
+        publish ? publicationMetadata(creation) : null]);
+      if (input.importKey) await client.query('update public.creations set import_key = $1 where id = $2',
+        [String(input.importKey).slice(0, 200), id]);
       return loadOwnedCreation(client, id, { includeVersions: true });
     }));
   };
@@ -162,7 +192,9 @@ export function createPostgresCommunityRepository({
 
     async saveProfile(input) {
       const userResult = await pool.query(
-        'select id, email, name, image from public.auth_users where id = $1',
+        `select id,email,name,image,
+          (select username from public.profiles where profiles.id=auth_users.id) as username
+          from public.auth_users where id = $1`,
         [userId],
       );
       if (!userResult.rows[0]) throw new Error('Authenticated Better Auth user was not found.');
@@ -174,7 +206,13 @@ export function createPostgresCommunityRepository({
         avatarUrl: input?.avatarUrl || user.image || '',
         now,
       });
-      const profile = { ...draft, id: userId };
+      const requestedUsername = String(input?.username || user.username || draft.username).trim().toLowerCase();
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(requestedUsername) || requestedUsername.length < 3 || requestedUsername.length > 40) {
+        throw Object.assign(new Error('Username must use 3 to 40 lowercase letters, numbers, or single hyphens.'), {
+          status: 422, code: 'INVALID_USERNAME',
+        });
+      }
+      const profile = { ...draft, id: userId, username: requestedUsername };
       const result = await pool.query(`
         insert into public.profiles (
           id, username, display_name, avatar_url, bio, github_url, linkedin_url
@@ -198,8 +236,14 @@ export function createPostgresCommunityRepository({
 
     async saveVersion(creationId, input) {
       return remember(await withTransaction(async (client) => {
+        await client.query('select id from public.creations where id=$1 and owner_id=$2 for update', [creationId, userId]);
         const existing = await loadOwnedCreation(client, creationId, { includeVersions: true });
         if (!existing || existing.archivedAt) return null;
+        if (input?.expectedCurrentVersionId && input.expectedCurrentVersionId !== existing.currentVersion?.id) {
+          throw Object.assign(new Error('This project changed in another session. Reload before saving.'), {
+            status: 409, code: 'STALE_VERSION',
+          });
+        }
         const version = normalizeVersionForDatabase(createCreationVersion(existing, input, {
           id: createId(),
           now,
@@ -240,13 +284,15 @@ export function createPostgresCommunityRepository({
         select v.* from public.creation_versions v
         join public.creations c on c.id = v.creation_id
         where v.creation_id = $1 and v.id = $2
-          and (c.owner_id = $3 or (c.visibility = 'public' and c.archived_at is null))
+          and (c.owner_id = $3 or (c.visibility = 'public' and c.archived_at is null
+            and c.moderation_status='visible' and c.published_version_id=v.id))
       `, [creationId, versionId, userId]);
       return result.rows[0] ? fromVersionRow(result.rows[0]) : null;
     },
 
     async restoreVersion(creationId, versionId) {
       return remember(await withTransaction(async (client) => {
+        await client.query('select id from public.creations where id=$1 and owner_id=$2 for update', [creationId, userId]);
         const existing = await loadOwnedCreation(client, creationId, { includeVersions: true });
         if (!existing || existing.archivedAt) return null;
         const restored = applyRestoreVersion(existing, versionId, { id: createId(), now });
@@ -257,11 +303,20 @@ export function createPostgresCommunityRepository({
     },
 
     async publishCreation(creationId) {
-      return remember(await updateLifecycle(
-        creationId,
-        (creation) => applyPublish(creation, { now }),
-        { rejectArchived: true },
-      ));
+      return remember(await withTransaction(async (client) => {
+        await client.query('select id from public.creations where id=$1 and owner_id=$2 for update', [creationId, userId]);
+        const existing = await loadOwnedCreation(client, creationId, { includeVersions: true });
+        if (!existing || existing.archivedAt) return null;
+        validateVersionInput(existing.currentVersion, { publication: true });
+        validateVersionInput(existing.currentVersion, { publication: true });
+        const next = applyPublish(existing, { now });
+        const metadata = publicationMetadata(next);
+        await client.query(`update public.creations set visibility='public', published_at=$1,
+          published_version_id=current_version_id, published_metadata=$2, preview_config=$3,
+          publish_readiness=$4 where id=$5 and owner_id=$6`,
+        [next.publishedAt, metadata, next.previewConfig, next.publishReadiness, creationId, userId]);
+        return loadOwnedCreation(client, creationId, { includeVersions: true });
+      }));
     },
 
     async unpublishCreation(creationId) {
@@ -319,6 +374,7 @@ export function createPostgresCommunityRepository({
         if (!source) return null;
         const remixId = createId();
         const draft = buildRemix(source, { id: remixId, profile: state.profile, now });
+        draft.slug = `${createOwnerScopedSlug(draft.title, []).slice(0, 95)}-${remixId}`;
         const version = normalizeVersionForDatabase({ ...draft.currentVersion, id: createId() });
         await client.query(`
           insert into public.creations (
@@ -390,9 +446,11 @@ export function createPostgresCommunityRepository({
       const next = transform(existing);
       await client.query(`
         update public.creations set visibility = $1, published_at = $2,
-          archived_at = $3, updated_at = $4
-         where id = $5 and owner_id = $6
-      `, [next.visibility, next.publishedAt, next.archivedAt, next.updatedAt, creationId, userId]);
+          archived_at = $3, updated_at = $4, publish_readiness = $5,
+          preview_config = $6
+         where id = $7 and owner_id = $8
+      `, [next.visibility, next.publishedAt, next.archivedAt, next.updatedAt,
+        next.publishReadiness, next.previewConfig, creationId, userId]);
       return loadOwnedCreation(client, creationId, { includeVersions: true });
     });
   }
@@ -446,19 +504,10 @@ async function loadCreationForOwner(client, row, userId) {
 }
 
 function normalizeVersionForDatabase(version) {
-  const width = Math.max(1, Math.min(600, Number(version.width || version.settings?.width || 1)));
-  const height = Math.max(1, Math.min(600, Number(version.height || version.settings?.height || 1)));
-  return {
-    ...version,
-    width,
-    height,
-    generation: Math.max(0, Number(version.generation || 0)),
-    population: Math.max(0, Math.min(width * height, Number(version.population || 0))),
-    settings: version.settings || {},
-  };
+  return validateVersionInput(version);
 }
 
-function fromProfileRow(row) {
+export function fromProfileRow(row) {
   return {
     id: row.id,
     email: row.email || '',
@@ -472,7 +521,7 @@ function fromProfileRow(row) {
   };
 }
 
-function fromVersionRow(row) {
+export function fromVersionRow(row) {
   return {
     id: row.id,
     versionNumber: Number(row.version_number || 1),
@@ -488,7 +537,7 @@ function fromVersionRow(row) {
   };
 }
 
-function fromCreationRow(row, { versions = null } = {}) {
+export function fromCreationRow(row, { versions = null, publicOnly = false, userId = null } = {}) {
   const currentVersion = row.version_id
     ? fromVersionRow({
       id: row.version_id,
@@ -504,24 +553,29 @@ function fromCreationRow(row, { versions = null } = {}) {
       created_at: row.version_created_at,
     })
     : null;
-  return {
+  const creation = {
     id: row.id,
     title: row.title,
     slug: row.slug,
+    canonicalUrl: row.visibility === 'public' ? `/c/${row.slug}` : null,
     description: row.description || '',
     attribution: row.attribution || '',
     tutorialReference: row.tutorial_reference || '',
     previewConfig: row.preview_config || {},
     publishReadiness: row.publish_readiness || {},
     visibility: row.visibility,
+    moderationStatus: row.moderation_status || 'visible',
     ownerId: row.owner_id,
     ownerName: row.owner_name || 'Community Builder',
+    ownerUsername: row.owner_username || '',
+    publishedVersionId: row.published_version_id || null,
     thumbnail: '',
     tags: row.tags || [],
     starCount: Number(row.star_count || 0),
     cloneCount: Number(row.clone_count || 0),
     viewCount: Number(row.view_count || 0),
-    starredBy: [],
+    starredByViewer: Boolean(row.viewer_starred && userId),
+    ...(publicOnly ? {} : { starredBy: row.viewer_starred && userId ? [userId] : [] }),
     remixedFromId: row.remixed_from_id || null,
     rootCreationId: row.root_creation_id || row.id,
     currentVersion,
@@ -531,4 +585,15 @@ function fromCreationRow(row, { versions = null } = {}) {
     publishedAt: row.published_at,
     archivedAt: row.archived_at,
   };
+  if (publicOnly && row.published_metadata) {
+    for (const key of ['title', 'description', 'tags', 'attribution', 'tutorialReference', 'previewConfig', 'publishReadiness']) {
+      if (row.published_metadata[key] !== undefined) creation[key] = row.published_metadata[key];
+    }
+  }
+  return creation;
+}
+
+function publicationMetadata(creation) {
+  return Object.fromEntries(['title', 'description', 'tags', 'attribution', 'tutorialReference',
+    'previewConfig', 'publishReadiness'].map((key) => [key, creation[key]]));
 }

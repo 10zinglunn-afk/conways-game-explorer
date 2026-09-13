@@ -5,6 +5,7 @@ playwright-report/
 .next/
 worker-assets/
 .wrangler/
+.backups/
 .env
 .env.*
 !.env.example

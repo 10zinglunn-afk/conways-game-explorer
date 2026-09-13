@@ -4,10 +4,13 @@ import {
   addCreationComment,
   createCommunityState,
   createCreationDraft,
+  createCreationPreviewConfig,
+  createOwnerScopedSlug,
   createProfile,
   createRemixTitle,
   cloneCreation,
   getTrendingCreations,
+  getCreationPublishReadiness,
   publishCreation,
   toggleStar,
 } from './community.js';
@@ -108,6 +111,8 @@ test('publishes a creation without mutating the original draft', () => {
     id: 'creation-one',
     profile,
     title: 'Block',
+    description: 'A stable four-cell still life for beginners.',
+    tags: ['still-life'],
     rle: 'x = 2, y = 2, rule = B3/S23\n2o$2o!',
     width: 2,
     height: 2,
@@ -119,6 +124,95 @@ test('publishes a creation without mutating the original draft', () => {
   assert.equal(draft.visibility, 'private');
   assert.equal(published.visibility, 'public');
   assert.equal(published.publishedAt, '2026-06-29T13:00:00.000Z');
+  assert.equal(published.canonicalUrl, '/c/block-one');
+  assert.equal(
+    publishCreation(published, { now: () => '2026-06-30T13:00:00.000Z' }).publishedAt,
+    published.publishedAt,
+  );
+});
+
+test('reports every publish-readiness issue without mutating the draft', () => {
+  const draft = createCreationDraft({
+    id: 'creation-empty',
+    title: '',
+    description: 'Too short',
+    tags: [],
+    rle: 'x = 0, y = 0, rule = B3/S23\n!',
+  });
+
+  const readiness = getCreationPublishReadiness(draft);
+
+  assert.equal(readiness.ready, false);
+  assert.deepEqual(readiness.checks, { metadata: false, board: false, preview: false });
+  assert.deepEqual(readiness.issues.map((issue) => issue.field), ['description', 'tags', 'board']);
+  assert.throws(() => publishCreation(draft), { name: 'PublishValidationError' });
+  assert.equal(draft.visibility, 'private');
+});
+
+test('accepts complete publish metadata and a non-empty valid board', () => {
+  const draft = createCreationDraft({
+    id: 'creation-ready',
+    title: 'Glider Clock',
+    description: 'A compact clock that emits a repeating glider signal.',
+    tags: ['glider', 'logic'],
+    rle: 'x = 3, y = 3, rule = B3/S23\nbo$2bo$3o!',
+  });
+
+  assert.deepEqual(getCreationPublishReadiness(draft), {
+    ready: true,
+    issues: [],
+    checks: { metadata: true, board: true, preview: true },
+  });
+});
+
+test('generates a deterministic framed preview with accessible fallback text', () => {
+  const creation = createCreationDraft({
+    id: 'creation-preview',
+    title: 'Preview Glider',
+    description: 'A deterministic glider preview for public cards.',
+    tags: ['glider'],
+    rle: 'x = 3, y = 3, rule = B3/S23\nbo$2bo$3o!',
+    settings: { backgroundColor: '#112233', liveCellColor: '#abcdef' },
+  });
+
+  const first = createCreationPreviewConfig(creation);
+  const second = createCreationPreviewConfig(creation);
+
+  assert.deepEqual(first, second);
+  assert.equal(first.version, 1);
+  assert.equal(first.camera.mode, 'fit-pattern');
+  assert.equal(first.cells.length, 5);
+  assert.deepEqual(first.colors, { background: '#112233', live: '#abcdef' });
+  assert.match(first.altText, /Preview of Preview Glider: 5 live cells/);
+});
+
+test('preserves a selected current-view camera frame when publishing', () => {
+  const draft = createCreationDraft({
+    id: 'creation-framed',
+    title: 'Framed line',
+    description: 'A long line with a deliberately cropped default view.',
+    tags: ['line'],
+    rle: 'x = 10, y = 1, rule = B3/S23\n10o!',
+    previewConfig: { camera: { mode: 'current-view', frame: { x: 2, y: 0, width: 4, height: 1 } } },
+  });
+
+  const published = publishCreation(draft);
+
+  assert.deepEqual(published.previewConfig.camera, {
+    mode: 'current-view',
+    frame: { x: 2, y: 0, width: 4, height: 1 },
+  });
+  assert.match(published.previewConfig.altText, /4 of 10 live cells/);
+  assert.equal(published.publishReadiness.preview, true);
+});
+
+test('allocates deterministic owner-scoped slug collisions', () => {
+  assert.equal(createOwnerScopedSlug('Glider Clock', []), 'glider-clock');
+  assert.equal(createOwnerScopedSlug('Glider Clock', ['glider-clock']), 'glider-clock-2');
+  assert.equal(
+    createOwnerScopedSlug('Glider Clock', ['glider-clock', 'glider-clock-2', 'glider-clock-4']),
+    'glider-clock-3',
+  );
 });
 
 test('stars and unstars creations per profile', () => {

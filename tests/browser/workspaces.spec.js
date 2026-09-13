@@ -3,20 +3,23 @@ import { expect, test } from '@playwright/test';
 async function enterPlayground(page) {
   await page.goto('/');
   await expect(page).toHaveTitle(/Conway/i);
-  await expect(page.locator('#intro-start')).toBeEnabled();
-  await page.locator('#intro-start').click();
-  await expect(page.locator('#intro-layer')).toBeHidden({ timeout: 3_000 });
-  await expect(page.locator('#playground-tutorial')).toBeVisible();
-  await page.locator('#playground-tutorial-skip').click();
-  await expect(page.locator('#playground-tutorial')).toBeHidden();
+  await expect(page.locator('#intro-layer')).toBeHidden();
 }
 
 async function clickBoard(page, xRatio = 0.5, yRatio = 0.44) {
-  const viewport = page.viewportSize();
-  await page.mouse.click(
-    Math.round(viewport.width * xRatio),
-    Math.round(viewport.height * yRatio),
-  );
+  const point = await page.evaluate(({ xRatio, yRatio }) => {
+    const candidates = [];
+    for (let y = 20; y < innerHeight - 20; y += 12) {
+      for (let x = 20; x < innerWidth - 20; x += 12) {
+        if (document.elementFromPoint(x, y)?.id === 'world') candidates.push({ x, y });
+      }
+    }
+    return candidates.sort((a, b) => Math.hypot(a.x - innerWidth * xRatio, a.y - innerHeight * yRatio)
+      - Math.hypot(b.x - innerWidth * xRatio, b.y - innerHeight * yRatio))[0];
+  }, { xRatio, yRatio });
+  expect(point, 'an unobstructed part of the board must be touchable').toBeTruthy();
+  if ((page.viewportSize()?.width || 0) < 600) await page.touchscreen.tap(point.x, point.y);
+  else await page.mouse.click(point.x, point.y);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -36,8 +39,10 @@ test('playground draws, stamps repeatedly, transforms a stamp, and clears stamp 
 
   const canvas = page.locator('#world');
   await expect(canvas).toBeVisible();
+  await expect(page.locator('#population')).toHaveText('5');
+  const populationBeforeDraw = Number(await page.locator('#population').textContent());
   await clickBoard(page);
-  await expect(page.locator('#population')).toHaveText('1');
+  await expect.poll(async () => Number(await page.locator('#population').textContent())).not.toBe(populationBeforeDraw);
 
   await page.locator('[data-pattern-tab="motion"]').click();
   await page.locator('[data-preset-id="glider"]').click();
@@ -58,8 +63,10 @@ test('playground draws, stamps repeatedly, transforms a stamp, and clears stamp 
 
 test('Dev Studio launches a project without losing the current board and exposes save state', async ({ page }) => {
   await enterPlayground(page);
+  await expect(page.locator('#population')).toHaveText('5');
+  const populationBeforeDraw = Number(await page.locator('#population').textContent());
   await clickBoard(page);
-  await expect(page.locator('#population')).toHaveText('1');
+  await expect.poll(async () => Number(await page.locator('#population').textContent())).not.toBe(populationBeforeDraw);
 
   await page.locator('#mode-dev').click();
   await expect(page.locator('.app-shell')).toHaveClass(/dev-start-mode/);
@@ -110,6 +117,37 @@ test('Dev Studio saves immutable versions and restores history as a new version'
   await expect(page.locator('.version-row.current')).toContainText('Version 3');
 });
 
+test('Dev Studio validates publish readiness and exposes the publish state', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chromium', 'Publish state is covered once in Chromium.');
+  await enterPlayground(page);
+  await page.locator('#mode-dev').click();
+  await page.locator('#profile-name').fill('Publish Builder');
+  await page.locator('#profile-email').fill('publish@example.com');
+  await page.locator('#save-profile').click();
+  await page.locator('#dev-create-design').click();
+  await page.locator('#tool-drawer-toggle').click();
+  await page.locator('#dev-design-title').fill('Validated browser design');
+  await page.locator('#dev-design-description').fill('Too short');
+  await page.locator('#dev-design-tags').fill('browser, publish');
+  await clickBoard(page, 0.46, 0.4);
+  await page.locator('#preview-use-view').click();
+  await expect(page.locator('#dev-preview-mode')).toHaveText('Current view');
+  await expect(page.locator('#preview-use-view')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#dev-preview')).toHaveAttribute('aria-label', /1 live cell/);
+  await expect(page.locator('#dev-preview .preview-grid span')).toHaveCount(1);
+
+  await page.locator('#publish-design').click();
+  await expect(page.locator('#publish-design')).toHaveText('Retry Publish');
+  await expect(page.locator('#dev-output')).toContainText('at least 20 characters');
+
+  await page.locator('#dev-design-description').fill('A complete browser-tested publishing workflow.');
+  await page.locator('#publish-design').click();
+  await expect(page.locator('#account-dialog')).toBeVisible();
+  await expect(page.locator('#account-context')).toContainText('Sign in to publish');
+  await expect(page.locator('#dev-design-title')).toHaveValue('Validated browser design');
+  await page.locator('#account-close').click();
+});
+
 test('Dev Studio recovers a debounced unsaved draft after reload', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-chromium', 'Recovery is storage behavior covered once in Chromium.');
   await enterPlayground(page);
@@ -121,8 +159,6 @@ test('Dev Studio recovers a debounced unsaved draft after reload', async ({ page
   await page.waitForTimeout(700);
 
   await page.reload();
-  await expect(page.locator('#intro-start')).toBeEnabled();
-  await page.locator('#intro-start').click();
   await expect(page.locator('#intro-layer')).toBeHidden({ timeout: 3_000 });
   await expect(page.locator('.app-shell')).toHaveClass(/dev-active-mode/);
   await expect(page.locator('#dev-design-title')).toHaveValue('Recovered browser draft');
@@ -143,14 +179,56 @@ test('Community renders discovery controls and explicitly gates shared actions',
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-community-filter-value="all"]')).toBeFocused();
   await page.keyboard.press('End');
-  await expect(page.locator('[data-community-filter-value="remixes"]')).toBeFocused();
+  await expect(page.locator('[data-community-filter-value="favorites"]')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.locator('#community-filter-button')).toBeFocused();
 
   const firstCard = page.locator('#community-famous-list .community-card').first();
   await expect(firstCard).toBeVisible();
   await firstCard.getByRole('button', { name: 'Star' }).click();
-  await expect(page.locator('#community-output')).toContainText('starred locally for this session');
+  await expect(page.locator('#account-dialog')).toBeVisible();
+  await expect(page.locator('#account-context')).toContainText('Favorites');
+});
+
+test('account dialog is contextual in every workspace and exposes honest local availability', async ({ page }) => {
+  await enterPlayground(page);
+  for (const workspace of ['#mode-playground', '#mode-dev', '#mode-community']) {
+    await page.locator(workspace).click();
+    await page.locator('#account-entry').click();
+    await expect(page.locator('#account-dialog')).toBeVisible();
+    await expect(page.locator('#account-context')).toContainText('unavailable in this local build');
+    await expect(page.locator('#account-submit')).toBeDisabled();
+    await page.locator('#account-close').click();
+  }
+});
+
+test('public preset URL reloads directly and guest remix opens a private attributed Studio project', async ({ page }) => {
+  await page.goto('/c/famous-glider');
+  await expect(page.locator('#intro-layer')).toBeHidden();
+  await expect(page.locator('.app-shell')).toHaveClass(/community-mode/);
+  await expect(page.locator('#community-detail')).toContainText('Glider');
+  await page.locator('#community-detail').getByRole('button', { name: 'Remix' }).click();
+  await expect(page.locator('.app-shell')).toHaveClass(/dev-active-mode/);
+  await expect(page.locator('#dev-design-title')).toHaveValue('Glider Remix');
+  await expect(page.locator('#dev-design-attribution')).toHaveValue('Remixed from Glider by LifeWiki.');
+  await page.reload();
+  await expect(page.locator('#dev-design-title')).toHaveValue('Glider Remix');
+});
+
+test('Studio exposes only verified circuit experiments with editable input ports', async ({ page }) => {
+  await enterPlayground(page);
+  await page.locator('#mode-dev').click();
+  await page.locator('#dev-create-design').click();
+  await page.locator('#tool-drawer-toggle').click();
+  await page.locator('.dev-command-strip > summary').click();
+
+  await expect(page.locator('#circuit-experiments')).toContainText('AND gate');
+  await expect(page.locator('#circuit-experiments')).toContainText('Binary half-adder');
+  await expect(page.locator('#circuit-experiments')).not.toContainText('XOR');
+  const andCard = page.locator('[data-circuit-id="and"]');
+  await andCard.locator('[data-circuit-input="a"]').check();
+  await expect(andCard.locator('[data-circuit-input="a"]')).toBeChecked();
+  await expect(andCard.locator('[data-circuit-output="and"]')).toContainText('Output settles at generation 600');
 });
 
 test('mobile workspace navigation and tool drawer remain usable without horizontal overflow', async ({ page }) => {

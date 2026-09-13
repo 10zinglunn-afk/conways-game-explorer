@@ -63,21 +63,101 @@ export function countNeighbors(board, x, y, { wrapping = true } = {}) {
 }
 
 export function nextGeneration(board, options = {}) {
-  const { wrapping = true } = options;
-  const next = createBoard(board.width, board.height);
-  next.generation = board.generation + 1;
+  return createLifeStepper(board, options).step();
+}
 
-  for (let y = 0; y < board.height; y += 1) {
-    for (let x = 0; x < board.width; x += 1) {
-      const alive = getCell(board, x, y);
-      const neighbors = countNeighbors(board, x, y, { wrapping });
-      const survives = alive && (neighbors === 2 || neighbors === 3);
-      const born = !alive && neighbors === 3;
-      next.cells[cellIndex(next, x, y)] = survives || born ? 1 : 0;
+// The interactive runtime retains this stepper in a dedicated Worker. Two cell
+// buffers and a one-cell halo avoid allocation and modulo in the inner loop.
+// Empty 32x32 regions are skipped; their adjacent regions still run so births
+// across tile/world edges obey exactly the same B3/S23 rules.
+export function createLifeStepper(seed, { wrapping = true } = {}) {
+  const { width, height } = seed;
+  const stride = width + 2;
+  const tileSize = 32;
+  const columns = Math.ceil(width / tileSize);
+  const rows = Math.ceil(height / tileSize);
+  let cells = new Uint8Array(seed.cells);
+  let next = new Uint8Array(cells.length);
+  const halo = new Uint8Array((width + 2) * (height + 2));
+  let active = new Uint8Array(columns * rows);
+  let following = new Uint8Array(active.length);
+  const candidates = new Uint8Array(active.length);
+  let generation = seed.generation || 0;
+  let population = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (cells[y * width + x]) {
+        active[Math.floor(y / tileSize) * columns + Math.floor(x / tileSize)] = 1;
+        population += 1;
+      }
     }
   }
 
-  return next;
+  return {
+    snapshot() { return { width, height, generation, population, cells: new Uint8Array(cells) }; },
+    step() {
+      for (let y = 0; y < height; y += 1) {
+        const source = y * width;
+        const target = (y + 1) * stride + 1;
+        halo.set(cells.subarray(source, source + width), target);
+        if (wrapping) {
+          halo[target - 1] = cells[source + width - 1];
+          halo[target + width] = cells[source];
+        }
+      }
+      if (wrapping) {
+        halo.set(halo.subarray(height * stride, (height + 1) * stride), 0);
+        halo.set(halo.subarray(stride, stride * 2), (height + 1) * stride);
+      }
+      candidates.fill(0);
+      for (let ty = 0; ty < rows; ty += 1) {
+        for (let tx = 0; tx < columns; tx += 1) {
+          if (!active[ty * columns + tx]) continue;
+          for (let dy = -1; dy <= 1; dy += 1) {
+            for (let dx = -1; dx <= 1; dx += 1) {
+              let x = tx + dx;
+              let y = ty + dy;
+              if (wrapping) {
+                x = (x + columns) % columns;
+                y = (y + rows) % rows;
+              } else if (x < 0 || y < 0 || x >= columns || y >= rows) continue;
+              candidates[y * columns + x] = 1;
+            }
+          }
+        }
+      }
+      next.fill(0);
+      following.fill(0);
+      population = 0;
+      for (let ty = 0; ty < rows; ty += 1) {
+        for (let tx = 0; tx < columns; tx += 1) {
+          const tile = ty * columns + tx;
+          if (!candidates[tile]) continue;
+          const endY = Math.min(height, (ty + 1) * tileSize);
+          const endX = Math.min(width, (tx + 1) * tileSize);
+          for (let y = ty * tileSize; y < endY; y += 1) {
+            let index = y * width + tx * tileSize;
+            let h = (y + 1) * stride + tx * tileSize + 1;
+            for (let x = tx * tileSize; x < endX; x += 1, index += 1, h += 1) {
+              const neighbors = halo[h - stride - 1] + halo[h - stride] + halo[h - stride + 1]
+                + halo[h - 1] + halo[h + 1]
+                + halo[h + stride - 1] + halo[h + stride] + halo[h + stride + 1];
+              if (neighbors === 3 || (halo[h] === 1 && neighbors === 2)) {
+                next[index] = 1;
+                following[tile] = 1;
+                population += 1;
+              }
+            }
+          }
+        }
+      }
+      [cells, next] = [next, cells];
+      [active, following] = [following, active];
+      generation += 1;
+      // Borrowed until the next step. snapshot() returns an owned copy.
+      return { width, height, generation, population, cells };
+    },
+  };
 }
 
 export function placePattern(board, coordinates, originX, originY) {

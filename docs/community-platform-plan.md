@@ -20,6 +20,7 @@
 | Cloud repository implementation | Better Auth, migration runner, parameterized PostgreSQL repository, API routes, and browser proxy are implemented; live contract remains pending a disposable database. |
 | Durable Dev Studio workflow | Implemented locally: existing projects append immutable versions, restore creates a new version, metadata/lifecycle actions are available, and debounced crash recovery preserves unsaved board settings. |
 | Browser auth UI + shared-action gating | Done: email-and-password controls, sign-out fallback to local mode, local-to-cloud migration on sign-in, and publish/star/clone gating |
+| Validated publishing workflow | Implemented locally: shared readiness/RLE validation, deterministic owner-scoped slugs, idempotent publication, explicit client states, canonical URLs, selectable camera framing, deterministic accessible previews, and PostgreSQL public-row constraints are done; live disposable PostgreSQL verification remains |
 | Next.js migration + public SSR pages | Not started (Phase 3) |
 
 The local-first build is the product scaffold. It is not real auth or

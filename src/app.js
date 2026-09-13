@@ -5,17 +5,25 @@ import {
   createRandomBoard,
   getCell,
   getPopulation,
-  nextGeneration,
+  cloneBoard,
   placePattern,
   wrap,
 } from './life.js';
+import { boardFromRle, boardToRle, createBoardHistory, copySelection, pasteSelection, transformSelection } from './board-tools.js';
+import { createSimulationClient } from './simulation-client.js';
+import { buildCircuitExperiment, circuitExperiments, readCircuitOutputs } from './circuits.js';
 import {
   describeDriftClaim,
   describePeriodClaim,
   describePopulationSnapshot,
 } from './dev-tools.js';
 import { createCommunityRepository, migrateLocalState } from './community-repository.js';
-import { addCreationComment, createRemixTitle } from './community.js';
+import {
+  addCreationComment,
+  createCreationPreviewConfig,
+  createRemixTitle,
+  getCreationPublishReadiness,
+} from './community.js';
 import { encodeShareLink, decodeShareLink } from './share.js';
 import {
   encodeRle,
@@ -53,6 +61,8 @@ import {
 } from './tutorials.js';
 import { mountLandingIntro } from './landing.js';
 import { getPresetStampSummary, presetGroups, presets } from './presets.js';
+import { createPendingActionStore, validateAccountFields } from './account-flow.js';
+import { readRecovery, writeRecovery, deleteRecovery } from './local-database.js';
 
 const WORLD_WIDTH = 300;
 const WORLD_HEIGHT = 200;
@@ -60,6 +70,7 @@ const LOCAL_RECOVERY_KEY = 'life-logic-dev-recovery-v1';
 const BASE_CELL_SIZE = 10;
 const MIN_ZOOM = 0.18;
 const MAX_ZOOM = 3.6;
+const MAX_MAIN_THREAD_CATCH_UP_STEPS = 4;
 const DEFAULT_DESIGN_SETTINGS = createDesignSettings({
   gridPreset: 'medium',
   width: WORLD_WIDTH,
@@ -78,6 +89,11 @@ const elements = {
   step: document.querySelector('#step'),
   clear: document.querySelector('#clear'),
   randomize: document.querySelector('#randomize'),
+  undo: document.querySelector('#undo'),
+  redo: document.querySelector('#redo'),
+  resetStart: document.querySelector('#reset-start'),
+  promoteState: document.querySelector('#promote-state'),
+  fitBoard: document.querySelector('#fit-board'),
   toolDrawerToggle: document.querySelector('#tool-drawer-toggle'),
   toolDrawerLabel: document.querySelector('[data-tool-drawer-label]'),
   toolDrawerClose: document.querySelector('#tool-drawer-close'),
@@ -126,6 +142,21 @@ const elements = {
   introSkip: document.querySelector('#intro-skip'),
   playerName: document.querySelector('#player-name'),
   playerMeta: document.querySelector('#player-meta'),
+  accountEntry: document.querySelector('#account-entry'),
+  accountDialog: document.querySelector('#account-dialog'),
+  accountContext: document.querySelector('#account-context'),
+  accountTabs: document.querySelector('#account-tabs'),
+  accountName: document.querySelector('#account-name'),
+  accountEmail: document.querySelector('#account-email'),
+  accountPassword: document.querySelector('#account-password'),
+  accountRecoveryKey: document.querySelector('#account-recovery-key'),
+  accountSubmit: document.querySelector('#account-submit'),
+  accountOutput: document.querySelector('#account-output'),
+  accountSecurity: document.querySelector('#account-security'),
+  accountCreateRecovery: document.querySelector('#account-create-recovery'),
+  accountRecoveryOutput: document.querySelector('#account-recovery-output'),
+  accountDeleteConfirmation: document.querySelector('#account-delete-confirmation'),
+  accountDelete: document.querySelector('#account-delete'),
   modePlayground: document.querySelector('#mode-playground'),
   modeDev: document.querySelector('#mode-dev'),
   modeCommunity: document.querySelector('#mode-community'),
@@ -166,6 +197,11 @@ const elements = {
   selectionColor: document.querySelector('#selection-color'),
   saveDesign: document.querySelector('#save-design'),
   publishDesign: document.querySelector('#publish-design'),
+  devPreview: document.querySelector('#dev-preview'),
+  devPreviewMode: document.querySelector('#dev-preview-mode'),
+  devPreviewDescription: document.querySelector('#dev-preview-description'),
+  previewFitPattern: document.querySelector('#preview-fit-pattern'),
+  previewUseView: document.querySelector('#preview-use-view'),
   unpublishDesign: document.querySelector('#unpublish-design'),
   archiveDesign: document.querySelector('#archive-design'),
   deleteDesign: document.querySelector('#delete-design'),
@@ -176,6 +212,7 @@ const elements = {
   devComponentButtons: document.querySelectorAll('[data-dev-component]'),
   devDemoButtons: document.querySelectorAll('[data-dev-demo]'),
   devClaimButtons: document.querySelectorAll('[data-dev-claim]'),
+  circuitExperiments: document.querySelector('#circuit-experiments'),
   communityPanel: document.querySelector('#community-panel'),
   communityCount: document.querySelector('#community-count'),
   profileName: document.querySelector('#profile-name'),
@@ -215,6 +252,7 @@ const elements = {
 };
 
 const localCommunity = createCommunityRepository({ backend: 'local' });
+const pendingActions = createPendingActionStore();
 let community = localCommunity;
 let communityState = community.getState();
 
@@ -238,6 +276,14 @@ let recoveryTimer = null;
 
 const state = {
   board: createBoard(DEFAULT_DESIGN_SETTINGS.width, DEFAULT_DESIGN_SETTINGS.height),
+  authoredStart: null,
+  history: createBoardHistory(),
+  clipboard: null,
+  selection: null,
+  circuit: null,
+  circuitInputs: {},
+  simulation: null,
+  simulationLoad: null,
   trail: new Uint8Array(DEFAULT_DESIGN_SETTINGS.width * DEFAULT_DESIGN_SETTINGS.height),
   age: new Uint16Array(DEFAULT_DESIGN_SETTINGS.width * DEFAULT_DESIGN_SETTINGS.height),
   populationHistory: [],
@@ -257,7 +303,10 @@ const state = {
   designSettings: DEFAULT_DESIGN_SETTINGS,
   designDirty: false,
   saveStatus: 'saved',
+  publishStatus: 'draft',
+  previewConfig: {},
   recoveryFailed: false,
+  simulationStepPending: false,
   ageColors: true,
   panX: 0,
   panY: 0,
@@ -268,6 +317,11 @@ const state = {
   communitySearch: '',
   communityFilter: 'all',
   communityComments: {},
+  publicCreations: [],
+  publicProfile: null,
+  patternFavorites: [],
+  communityLoadStatus: 'idle',
+  accountMode: 'sign-in',
   pointer: {
     active: false,
     mode: 'draw',
@@ -386,6 +440,7 @@ async function initializeCommunityBackend() {
       const session = await readCommunityAuthSession(cloudRepo);
       if (session) {
         await handleCommunityAuthSession(session, { reason: 'initial session' });
+        if (isCloudCommunityActive()) await resumePendingAccountAction();
       } else {
         communityAuth.message = 'Sign in to publish, star, or clone.';
         renderCommunityAuth();
@@ -402,6 +457,7 @@ async function initializeCommunityBackend() {
     const session = await readCommunityAuthSession(cloudRepo);
     if (session) {
       await handleCommunityAuthSession(session, { reason: 'initial session' });
+      if (isCloudCommunityActive()) await resumePendingAccountAction();
     } else {
       communityAuth.message = 'Sign in to publish, star, or clone.';
       renderCommunityAuth();
@@ -564,13 +620,27 @@ async function activateCloudCommunity(session) {
 
   try {
     await saveCloudProfileFromLocal(repo, communityAuth.user);
-    const migration = await migrateLocalState(localCommunity, repo);
+    const migration = await migrateLocalState(localCommunity, repo, { deferCleanup: true });
     await repo.loadCommunityState();
+    const mappings = localCommunity.getState().importMappings || {};
+    remapActiveDesignSession(
+      { ...Object.fromEntries(Object.entries(mappings).map(([id, mapping]) => [id, mapping.cloudProjectId])), ...migration?.creationMap },
+      { ...Object.fromEntries(Object.entries(mappings).map(([id, mapping]) => [id, mapping.versionIds])), ...migration?.versionMaps },
+    );
     community = repo;
     communityState = community.getState();
     communityAuth.migratedUserId = communityAuth.user?.id || null;
     communityAuth.message = getMigrationMessage(migration);
     renderCommunity();
+    // Activation is complete. Cleanup failures retain a safe local copy and
+    // must never switch this cloud-ID editor back to a local repository.
+    for (const result of migration.results || []) {
+      try {
+        await localCommunity.commitImportedSnapshot(result.snapshot.creation.id, result.snapshot, result.mapping);
+      } catch {
+        communityAuth.message = 'Cloud ready. A local backup was retained because cleanup could not finish.';
+      }
+    }
   } catch (error) {
     community = localCommunity;
     communityState = localCommunity.getState();
@@ -581,6 +651,20 @@ async function activateCloudCommunity(session) {
     communityAuth.migrating = false;
     renderCommunityAuth();
   }
+}
+
+function remapActiveDesignSession(creationMap, versionMaps = {}) {
+  const localId = state.activeDesignSession?.creationId;
+  const cloudId = localId && creationMap?.[localId];
+  if (!cloudId) return;
+
+  // Keep the in-memory board and dirty state untouched. Only the repository
+  // identifier changes, so a queued Publish resumes against the cloud build.
+  state.activeDesignSession = { ...state.activeDesignSession, creationId: cloudId };
+  if (state.activeDesignSession.currentVersionId && versionMaps?.[localId]?.[state.activeDesignSession.currentVersionId]) {
+    state.activeDesignSession.currentVersionId = versionMaps[localId][state.activeDesignSession.currentVersionId];
+  }
+  if (state.designDirty) scheduleLocalRecovery();
 }
 
 async function saveCloudProfileFromLocal(repo, user) {
@@ -628,7 +712,7 @@ function isCloudCommunityActive() {
 }
 
 function requiresCloudSignInForSharedAction() {
-  return communityAuth.cloudConfigured && !isCloudSignedIn();
+  return !isCloudCommunityActive();
 }
 
 function showSignInRequired(action) {
@@ -636,6 +720,149 @@ function showSignInRequired(action) {
   communityAuth.message = message;
   elements.communityOutput.textContent = message;
   renderCommunityAuth();
+  openAccountDialog({ context: message });
+}
+
+function queueAccountAction(type, args = {}, context = '') {
+  const pending = pendingActions.set({ type, args, returnRoute: window.location.pathname + window.location.search });
+  openAccountDialog({ context: context || `Sign in to continue ${type.replaceAll('-', ' ')}.` });
+  return pending;
+}
+
+function openAccountDialog({ mode = 'sign-in', context = '' } = {}) {
+  if (!elements.accountDialog.open) state.accountDialogTrigger = document.activeElement;
+  state.accountMode = mode;
+  if (elements.accountContext) {
+    elements.accountContext.textContent = context || (isCloudSignedIn()
+      ? 'Your account is active in every workspace.'
+      : communityAuth.cloudConfigured ? 'Sign in without leaving your current workspace.' : 'Cloud accounts are unavailable in this local build. Your device drafts remain safe.');
+  }
+  renderAccountDialog();
+  if (!elements.accountDialog.open) elements.accountDialog.showModal();
+}
+
+function trapAccountDialogFocus(event) {
+  if (event.key !== 'Tab' || !elements.accountDialog.open) return;
+  const focusable = [...elements.accountDialog.querySelectorAll('button, input, select, textarea, [href], [tabindex]')]
+    .filter((element) => !element.disabled && !element.hidden && element.tabIndex >= 0
+      && element.getClientRects().length > 0);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function renderAccountDialog() {
+  const signedIn = isCloudSignedIn();
+  const mode = state.accountMode;
+  for (const tab of elements.accountTabs?.querySelectorAll('[data-account-mode]') || []) {
+    tab.setAttribute('aria-selected', String(tab.dataset.accountMode === mode));
+    tab.disabled = signedIn;
+  }
+  document.querySelector('[data-account-field="name"]')?.toggleAttribute('hidden', mode !== 'sign-up');
+  document.querySelector('[data-account-field="recovery"]')?.toggleAttribute('hidden', mode !== 'recover');
+  elements.accountSubmit.textContent = mode === 'sign-up' ? 'Create account' : mode === 'recover' ? 'Recover account' : 'Sign in';
+  elements.accountSubmit.hidden = signedIn;
+  elements.accountSubmit.disabled = !communityAuth.cloudConfigured || communityAuth.submitting;
+  elements.accountSecurity.hidden = !signedIn;
+  if (signedIn) elements.accountContext.textContent = `Signed in as ${communityAuth.user?.email || communityAuth.session?.user?.email || 'Life Builder'}.`;
+}
+
+async function submitAccountDialog() {
+  const mode = state.accountMode;
+  const input = {
+    mode,
+    name: elements.accountName.value,
+    email: elements.accountEmail.value,
+    password: elements.accountPassword.value,
+    recoveryKey: elements.accountRecoveryKey.value,
+  };
+  const validation = validateAccountFields(input);
+  if (!validation.valid) {
+    elements.accountOutput.className = 'account-output error';
+    elements.accountOutput.textContent = Object.values(validation.issues)[0];
+    return;
+  }
+  communityAuth.submitting = true;
+  renderAccountDialog();
+  elements.accountOutput.className = 'account-output';
+  elements.accountOutput.textContent = mode === 'recover' ? 'Recovering account…' : mode === 'sign-up' ? 'Creating account…' : 'Signing in…';
+  try {
+    if (mode === 'recover') {
+      const result = await communityAuth.cloudRepo.recoverAccount({ email: validation.email, recoveryKey: input.recoveryKey.trim(), password: input.password });
+      elements.accountRecoveryOutput.hidden = false;
+      elements.accountRecoveryOutput.textContent = result.recoveryKey || result.key || 'A new recovery key was created. Save the key returned by the service.';
+      elements.accountOutput.textContent = 'Password changed. All previous sessions were revoked; sign in with the new password.';
+      elements.accountOutput.className = 'account-output success';
+      state.accountMode = 'sign-in';
+      return;
+    }
+    if (mode === 'sign-up') await communityAuth.cloudRepo.signUpWithEmail({ name: input.name.trim(), email: validation.email, password: input.password });
+    else await communityAuth.cloudRepo.signInWithEmail({ email: validation.email, password: input.password });
+    elements.accountPassword.value = '';
+    await refreshCommunitySession(mode === 'sign-up' ? 'account created' : 'signed in');
+    elements.accountOutput.textContent = 'Account ready.';
+    elements.accountOutput.className = 'account-output success';
+    await resumePendingAccountAction();
+  } catch (error) {
+    elements.accountOutput.textContent = getErrorMessage(error);
+    elements.accountOutput.className = 'account-output error';
+  } finally {
+    communityAuth.submitting = false;
+    renderAccountDialog();
+  }
+}
+
+async function resumePendingAccountAction() {
+  const stored = pendingActions.get();
+  if (!stored) return;
+  const pending = pendingActions.markAttempted(stored.token);
+  if (!pending) return;
+  try {
+    let result;
+    if (pending.type === 'publish') result = await saveCurrentCreation({ publish: true, resumed: true });
+    else if (pending.type === 'favorite-creation') result = await starCommunityCreation(pending.args.creationId, { resumed: true });
+    else if (pending.type === 'favorite-pattern') result = await community.setPatternFavorite(pending.args.patternId, true);
+    else if (pending.type === 'comment') result = await postCommunityComment({ body: pending.args.body, creationId: pending.args.creationId, resumed: true });
+    if (!result) throw new Error('The requested action was not confirmed.');
+    pendingActions.clear(pending.token);
+    elements.accountDialog.close();
+  } catch (error) {
+    pendingActions.retry(pending.token);
+    elements.accountOutput.textContent = `Signed in, but the action needs a retry: ${getErrorMessage(error)}`;
+    elements.accountOutput.className = 'account-output error';
+  }
+}
+
+async function generateRecoveryKey() {
+  const password = elements.accountPassword.value;
+  const validation = validateAccountFields({ mode: 'sign-in', email: communityAuth.user?.email || 'signed@in.test', password });
+  if (!validation.valid) { elements.accountOutput.textContent = validation.issues.password; return; }
+  try {
+    const result = await communityAuth.cloudRepo.createRecoveryKey(password);
+    elements.accountRecoveryOutput.hidden = false;
+    elements.accountRecoveryOutput.textContent = result.recoveryKey || result.key;
+    elements.accountOutput.textContent = 'Save this recovery key now. It will not be shown again.';
+    elements.accountOutput.className = 'account-output success';
+    elements.accountPassword.value = '';
+  } catch (error) { elements.accountOutput.textContent = getErrorMessage(error); elements.accountOutput.className = 'account-output error'; }
+}
+
+async function deleteCurrentAccount() {
+  const validation = validateAccountFields({ mode: 'delete', email: communityAuth.user?.email || 'signed@in.test', password: elements.accountPassword.value, confirmation: elements.accountDeleteConfirmation.value });
+  if (!validation.valid) { elements.accountOutput.textContent = Object.values(validation.issues)[0]; elements.accountOutput.className = 'account-output error'; return; }
+  try {
+    await communityAuth.cloudRepo.deleteAccount(elements.accountPassword.value);
+    await handleCommunityAuthSession(null, { reason: 'account deleted' });
+    elements.accountDialog.close();
+    showToast('Account deleted', { kind: 'success' });
+  } catch (error) { elements.accountOutput.textContent = getErrorMessage(error); elements.accountOutput.className = 'account-output error'; }
 }
 
 async function signUpCommunity() {
@@ -734,8 +961,14 @@ function renderCommunityAuth() {
   if (!elements.communityAuth) return;
 
   const visible = communityAuth.cloudConfigured || communityAuth.cloudRequested;
-  elements.communityAuth.hidden = !visible;
-  if (!visible) return;
+  // T5 has one contextual account surface. Keep the legacy embedded fields as
+  // compatibility inputs for older auth helpers, but never render two flows.
+  elements.communityAuth.hidden = true;
+  if (!visible) {
+    if (elements.accountEntry) elements.accountEntry.textContent = 'Account';
+    renderAccountDialog();
+    return;
+  }
 
   const signedIn = isCloudSignedIn();
   const userEmail = communityAuth.user?.email || communityAuth.session?.user?.email || '';
@@ -754,6 +987,8 @@ function renderCommunityAuth() {
   if (!elements.communityAuthEmail.value && document.activeElement !== elements.communityAuthEmail) {
     elements.communityAuthEmail.value = elements.profileEmail.value || userEmail;
   }
+  if (elements.accountEntry) elements.accountEntry.textContent = signedIn ? 'Account ✓' : 'Sign in';
+  renderAccountDialog();
 }
 
 function getCloudStatusText({ signedIn, userEmail }) {
@@ -775,11 +1010,152 @@ function resetBoardStorage(board = state.board) {
 }
 
 function replaceBoard(board, { center = false, markEffects = true } = {}) {
+  state.playing = false;
   state.board = board;
+  state.selection = null;
+  loadSimulation(board);
   resetBoardStorage(board);
   if (markEffects) markLivingCells(230, 1);
   if (center) centerWorld();
   updateStats();
+  updatePlayButton();
+}
+
+function ownedSnapshot(board = state.board) {
+  const snapshot = cloneBoard(board);
+  snapshot.population = getPopulation(snapshot);
+  return snapshot;
+}
+
+function loadSimulation(board = state.board, { wrapping = state.designSettings.wrapping } = {}) {
+  if (!state.simulation) return Promise.resolve();
+  const load = state.simulation.load(ownedSnapshot(board), { wrapping }).catch((error) => {
+    if (error?.name !== 'AbortError') throw error;
+  });
+  state.simulationLoad = load;
+  load.catch((error) => { elements.activeNote.textContent = `Simulation stopped: ${getErrorMessage(error)}`; });
+  return load;
+}
+
+function beginAuthoringCommand() {
+  if (state.playing) {
+    state.playing = false;
+    updatePlayButton();
+  }
+  state.simulation?.cancel();
+  loadSimulation();
+  state.history.record(ownedSnapshot());
+}
+
+function finishAuthoringCommand(note = '', { keepSelection = false } = {}) {
+  state.board.generation = 0;
+  state.authoredStart = ownedSnapshot();
+  if (!keepSelection) state.selection = null;
+  loadSimulation();
+  markDesignDirty(true);
+  updateHistoryControls();
+  if (note) elements.activeNote.textContent = note;
+  updateStats();
+}
+
+function selectionCommand(command) {
+  if (command === 'copy' && state.selection) {
+    state.clipboard = copySelection(state.board, state.selection);
+    elements.activeNote.textContent = 'Selection copied. Select a destination, then paste.';
+    return;
+  }
+  if (command === 'clear') { state.selection = null; return; }
+  if (command !== 'paste' && !state.selection) return;
+  if (command === 'paste' && !state.clipboard) return;
+  let result;
+  const rect = state.selection;
+  if (command === 'paste') {
+    const origin = rect || screenToCell(window.innerWidth / 2, window.innerHeight / 2);
+    const x = Math.max(0, Math.min(state.board.width - state.clipboard.width, origin.x));
+    const y = Math.max(0, Math.min(state.board.height - state.clipboard.height, origin.y));
+    result = pasteSelection(state.board, state.clipboard, x, y);
+  } else if (command === 'rotate' || command === 'reflect') {
+    if (command === 'rotate' && (rect.x + rect.height > state.board.width || rect.y + rect.width > state.board.height)) {
+      elements.activeNote.textContent = 'Move the selection away from the edge before rotating.';
+      return;
+    }
+    result = transformSelection(state.board, rect, command === 'rotate' ? { rotation: 90 } : { flipX: true });
+  } else {
+    const delta = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[command];
+    if (!delta) return;
+    const x = rect.x + delta[0]; const y = rect.y + delta[1];
+    if (x < 0 || y < 0 || x + rect.width > state.board.width || y + rect.height > state.board.height) return;
+    const copied = copySelection(state.board, rect);
+    const cleared = cloneBoard(state.board);
+    for (let row = rect.y; row < rect.y + rect.height; row += 1) {
+      cleared.cells.fill(0, row * cleared.width + rect.x, row * cleared.width + rect.x + rect.width);
+    }
+    result = pasteSelection(cleared, copied, x, y);
+  }
+  beginAuthoringCommand();
+  state.board = result.board;
+  state.selection = result.rect;
+  resetBoardStorage();
+  markLivingCells();
+  finishAuthoringCommand(`Selection: ${command}.`, { keepSelection: true });
+}
+
+function updateSelection(clientX, clientY) {
+  const start = state.pointer.selectionStart;
+  const end = screenToCell(clientX, clientY);
+  const x = Math.max(0, Math.min(state.board.width - 1, Math.min(start.x, end.x)));
+  const y = Math.max(0, Math.min(state.board.height - 1, Math.min(start.y, end.y)));
+  state.selection = { x, y,
+    width: Math.max(1, Math.min(state.board.width - 1, Math.max(start.x, end.x)) - x + 1),
+    height: Math.max(1, Math.min(state.board.height - 1, Math.max(start.y, end.y)) - y + 1) };
+}
+
+function updateHistoryControls() {
+  if (elements.undo) elements.undo.disabled = !state.history.canUndo || state.playing;
+  if (elements.redo) elements.redo.disabled = !state.history.canRedo || state.playing;
+}
+
+function undoBoard() {
+  if (state.playing) return;
+  const previous = state.history.undo(ownedSnapshot());
+  if (!previous) return;
+  replaceBoard(previous);
+  state.authoredStart = ownedSnapshot(previous);
+  markDesignDirty(true);
+  updateHistoryControls();
+}
+
+function redoBoard() {
+  if (state.playing) return;
+  const next = state.history.redo(ownedSnapshot());
+  if (!next) return;
+  replaceBoard(next);
+  state.authoredStart = ownedSnapshot(next);
+  markDesignDirty(true);
+  updateHistoryControls();
+}
+
+function resetToStart() {
+  if (!state.authoredStart) return;
+  state.playing = false;
+  replaceBoard(ownedSnapshot(state.authoredStart));
+  loadSimulation();
+  updatePlayButton();
+  elements.activeNote.textContent = 'Reset to the authored starting state.';
+}
+
+function promoteCurrentStateToStart() {
+  state.playing = false;
+  state.simulation?.cancel();
+  state.board.generation = 0;
+  state.authoredStart = ownedSnapshot();
+  state.history.clear();
+  loadSimulation();
+  markDesignDirty(true);
+  updateHistoryControls();
+  updatePlayButton();
+  elements.activeNote.textContent = 'The current frame is now the authored starting state.';
+  showToast('Current state promoted to start', { kind: 'success' });
 }
 
 function markDesignDirty(dirty = true) {
@@ -804,27 +1180,47 @@ function setSaveStatus(status) {
   }
 }
 
+function setPublishStatus(status) {
+  const labels = {
+    draft: 'Publish',
+    validating: 'Validating…',
+    publishing: 'Publishing…',
+    published: 'Published',
+    failed: 'Retry Publish',
+    unpublished: 'Republish',
+  };
+  state.publishStatus = status;
+  for (const button of [elements.publishDesign, elements.publishCreation]) {
+    if (!button) continue;
+    button.textContent = labels[status] || labels.draft;
+    button.disabled = status === 'validating' || status === 'publishing';
+    button.setAttribute('aria-busy', status === 'validating' || status === 'publishing' ? 'true' : 'false');
+  }
+}
+
 function scheduleLocalRecovery() {
   window.clearTimeout(recoveryTimer);
-  recoveryTimer = window.setTimeout(() => {
+  recoveryTimer = window.setTimeout(async () => {
     try {
-      const coordinates = getLiveCoordinates();
+      const authored = ownedSnapshot(state.authoredStart || state.board);
       const recovery = {
+        format: 'life-board-binary-v1',
         creationId: state.activeDesignSession?.creationId || null,
         title: state.activeDesignSession?.title || elements.devDesignTitle?.value || 'Untitled Design',
         description: elements.devDesignDescription?.value || '',
         tags: elements.devDesignTags?.value || '',
         attribution: elements.devDesignAttribution?.value || '',
         tutorialReference: elements.devDesignTutorial?.value || '',
-        rle: encodeRle(coordinates),
-        width: state.board.width,
-        height: state.board.height,
-        generation: state.board.generation,
-        population: coordinates.length,
+        cells: new Uint8Array(authored.cells),
+        width: authored.width,
+        height: authored.height,
+        generation: 0,
+        population: authored.population,
         settings: getCurrentDesignSettings(),
         savedAt: new Date().toISOString(),
       };
-      localStorage.setItem(LOCAL_RECOVERY_KEY, JSON.stringify(recovery));
+      await writeRecovery(LOCAL_RECOVERY_KEY, recovery);
+      localStorage.removeItem(LOCAL_RECOVERY_KEY);
       state.recoveryFailed = false;
     } catch {
       state.recoveryFailed = true;
@@ -838,27 +1234,29 @@ function clearLocalRecovery() {
   recoveryTimer = null;
   try {
     localStorage.removeItem(LOCAL_RECOVERY_KEY);
+    deleteRecovery(LOCAL_RECOVERY_KEY).catch(() => {});
     state.recoveryFailed = false;
   } catch {
     // A completed repository save is still authoritative if local recovery cleanup fails.
   }
 }
 
-function restoreLocalRecovery() {
+async function restoreLocalRecovery() {
   try {
     const raw = localStorage.getItem(LOCAL_RECOVERY_KEY);
-    if (!raw) return false;
-    const recovery = JSON.parse(raw);
-    const pattern = parseRle(recovery.rle);
+    const recovery = await readRecovery(LOCAL_RECOVERY_KEY) || (raw && JSON.parse(raw));
+    if (!recovery) return false;
     const settings = createDesignSettings(recovery.settings || {
       gridPreset: 'custom',
       width: recovery.width,
       height: recovery.height,
     });
-    const board = placePattern(createBoard(recovery.width, recovery.height), pattern.coordinates, 0, 0);
-    board.generation = Number(recovery.generation || 0);
+    const board = recovery.format === 'life-board-binary-v1' && recovery.cells
+      ? boardFromBinaryRecovery(recovery)
+      : boardFromRle(recovery.rle, { generation: Number(recovery.generation || 0), width: recovery.width, height: recovery.height });
     state.designSettings = settings;
     replaceBoard(board, { center: true });
+    state.authoredStart = ownedSnapshot(board);
     state.devProjectActive = true;
     state.activeDesignSession = {
       kind: 'editing',
@@ -879,6 +1277,17 @@ function restoreLocalRecovery() {
   } catch {
     return false;
   }
+}
+
+function boardFromBinaryRecovery(recovery) {
+  const bytes = recovery.cells instanceof Uint8Array ? recovery.cells : atob(String(recovery.cells));
+  const cells = new Uint8Array(bytes.length);
+  for (let index = 0; index < bytes.length; index += 1) cells[index] = typeof bytes === 'string' ? bytes.charCodeAt(index) : bytes[index];
+  if (cells.length !== Number(recovery.width) * Number(recovery.height)) throw new Error('Recovered board dimensions do not match its binary snapshot.');
+  const board = createBoard(Number(recovery.width), Number(recovery.height));
+  board.cells = cells;
+  board.generation = Number(recovery.generation || 0);
+  return board;
 }
 
 function getCurrentDesignSettings() {
@@ -903,10 +1312,11 @@ function applyDesignSettingsPatch(patch, { resizeBoard = false, dirty = true, ce
   state.designSettings = next;
 
   if (resizeBoard || dimensionsChanged) {
-    state.board = createBoard(next.width, next.height);
-    resetBoardStorage();
-    if (center) centerWorld();
-    updateStats();
+    replaceBoard(createBoard(next.width, next.height), { center });
+    state.authoredStart = ownedSnapshot();
+    state.history.clear();
+  } else if (previous.wrapping !== next.wrapping) {
+    loadSimulation();
   }
 
   setSpeed(next.speed);
@@ -1101,6 +1511,8 @@ function setDesignMetadataFields({
   tags = [],
   attribution = '',
   tutorialReference = '',
+  visibility,
+  previewConfig,
 } = {}) {
   setDesignTitle(title);
   const tagText = Array.isArray(tags) ? tags.join(', ') : String(tags || '');
@@ -1110,6 +1522,8 @@ function setDesignMetadataFields({
   if (elements.devDesignTags && document.activeElement !== elements.devDesignTags) {
     elements.devDesignTags.value = tagText;
   }
+  if (visibility) setPublishStatus(visibility === 'public' ? 'published' : 'draft');
+  if (previewConfig) state.previewConfig = previewConfig;
   if (elements.devDesignAttribution && document.activeElement !== elements.devDesignAttribution) {
     elements.devDesignAttribution.value = attribution || '';
   }
@@ -1122,6 +1536,7 @@ function setDesignMetadataFields({
   if (elements.creationTags && document.activeElement !== elements.creationTags) {
     elements.creationTags.value = tagText;
   }
+  renderDevPublishPreview();
 }
 
 function startDevProject(kind = 'design', {
@@ -1134,6 +1549,7 @@ function startDevProject(kind = 'design', {
   const player = communityState.profile?.displayName || 'Guest Builder';
   const sessionTitle = title || (kind === 'project' ? 'Untitled Project' : 'Untitled Design');
   state.devProjectActive = true;
+  state.previewConfig = {};
   state.toolDrawerOpen = openTools;
   state.activeDesignSession = source
     ? {
@@ -1269,6 +1685,7 @@ function paintCell(cellX, cellY, alive) {
   state.board.cells[index] = nextValue;
   state.trail[index] = alive ? 255 : 120;
   state.age[index] = alive ? Math.max(state.age[index], 1) : 0;
+  state.authoredStart = ownedSnapshot();
   markDesignDirty(true);
   updateStats();
 }
@@ -1304,6 +1721,7 @@ function stampPattern(cellX, cellY) {
   const originX = cellX - Math.floor(bounds.width / 2);
   const originY = cellY - Math.floor(bounds.height / 2);
 
+  beginAuthoringCommand();
   state.board = placePatternForCurrentSettings(state.board, coordinates, originX, originY);
   markLivingCells(255, 1);
   elements.activeNote.textContent = getToolStatusMessage({
@@ -1313,7 +1731,7 @@ function stampPattern(cellX, cellY) {
   });
   triggerHaptic('stampPlace');
   showToast(`Stamped ${state.selectedPreset.name}`, { kind: 'success' });
-  markDesignDirty(true);
+  finishAuthoringCommand();
   updateStats();
 }
 
@@ -1350,28 +1768,40 @@ function selectPreset(preset) {
   triggerHaptic('stampToggle');
 }
 
-function stepSimulation() {
+async function stepSimulation() {
+  if (state.simulationStepPending) return;
+  state.simulationStepPending = true;
   const previousCells = state.board.cells;
-  const next = nextGeneration(state.board, { wrapping: state.designSettings.wrapping });
+  try {
+    const load = state.simulationLoad;
+    await load;
+    if (load !== state.simulationLoad) return;
+    const next = await state.simulation.advance(1);
 
-  for (let i = 0; i < state.trail.length; i += 1) {
-    if (next.cells[i]) {
-      state.trail[i] = previousCells[i] ? Math.max(state.trail[i], 210) : 255;
-      state.age[i] = previousCells[i] ? Math.min(state.age[i] + 1, 1200) : 1;
-    } else if (previousCells[i]) {
-      state.trail[i] = Math.max(state.trail[i], 140);
-      state.age[i] = 0;
-    } else {
-      state.trail[i] = Math.floor(state.trail[i] * 0.84);
-      state.age[i] = 0;
+    for (let i = 0; i < state.trail.length; i += 1) {
+      if (next.cells[i]) {
+        state.trail[i] = previousCells[i] ? Math.max(state.trail[i], 210) : 255;
+        state.age[i] = previousCells[i] ? Math.min(state.age[i] + 1, 1200) : 1;
+      } else if (previousCells[i]) {
+        state.trail[i] = Math.max(state.trail[i], 140);
+        state.age[i] = 0;
+      } else {
+        state.trail[i] = Math.floor(state.trail[i] * 0.84);
+        state.age[i] = 0;
+      }
     }
-  }
 
-  state.board = next;
-  updateStats();
+    state.board = ownedSnapshot(next);
+    updateStats();
+  } catch (error) {
+    if (error?.name !== 'AbortError') elements.activeNote.textContent = `Simulation stopped: ${getErrorMessage(error)}`;
+  } finally {
+    state.simulationStepPending = false;
+  }
 }
 
 function loadPreset(preset) {
+  beginAuthoringCommand();
   const nextBoard = clearBoard(state.board);
   const bounds = getPatternBounds(preset.coordinates);
   const originX = Math.floor(state.board.width / 2 - bounds.width / 2);
@@ -1383,27 +1813,27 @@ function loadPreset(preset) {
   markLivingCells(255, 1);
 
   elements.activeNote.textContent = preset.note;
-  updateStats();
+  finishAuthoringCommand();
   updatePresetSelection();
   updateStampSummary();
 }
 
 function randomSoup() {
+  beginAuthoringCommand();
   state.board = createRandomBoard(state.board.width, state.board.height, 0.18);
   resetCellEffects();
   markLivingCells(230, 1);
 
   elements.activeNote.textContent = 'Random soup: turbulence first, then islands, oscillators, and debris.';
-  markDesignDirty(true);
-  updateStats();
+  finishAuthoringCommand('Random soup: turbulence first, then islands, oscillators, and debris.');
 }
 
 function clearWorld() {
+  beginAuthoringCommand();
   state.board = clearBoard(state.board);
   resetCellEffects();
   elements.activeNote.textContent = 'Blank board ready. Draw cells, drag in a pattern, then press Play.';
-  markDesignDirty(true);
-  updateStats();
+  finishAuthoringCommand('Blank board ready. Draw cells, drag in a pattern, then press Play.');
 }
 
 function importRle() {
@@ -1491,6 +1921,18 @@ function render() {
   drawGrid(cellSize, worldWidth, worldHeight);
   drawCells(cellSize);
   drawStampPreview(cellSize);
+  if (state.selection) {
+    const { x, y, width, height } = state.selection;
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = rgbaFromHex(state.designSettings.selectionColor, 0.16);
+    ctx.strokeStyle = state.designSettings.selectionColor;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.fillRect(x * cellSize, y * cellSize, width * cellSize, height * cellSize);
+    ctx.strokeRect(x * cellSize, y * cellSize, width * cellSize, height * cellSize);
+    ctx.restore();
+  }
 
   ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
   ctx.lineWidth = 1;
@@ -1913,6 +2355,72 @@ function setMode(mode) {
   syncToolDrawer();
 }
 
+function navigateTo(path, { replace = false, render = true } = {}) {
+  const method = replace ? 'replaceState' : 'pushState';
+  if (window.location.pathname + window.location.search !== path) window.history[method]({}, '', path);
+  if (render) routeCurrentLocation();
+}
+
+async function routeCurrentLocation() {
+  const path = window.location.pathname;
+  if (path === '/studio') {
+    const activeId = communityState.activeCreationId;
+    if (!state.activeDesignSession && activeId && community.findCreation(activeId)) openDevProject(activeId);
+    setMode('dev');
+    return;
+  }
+  if (path === '/community' || path === '/community/favorites') {
+    state.communityFilter = path.endsWith('/favorites') ? 'favorites' : 'all';
+    setMode('community');
+    return;
+  }
+  const creationMatch = path.match(/^\/c\/([^/]+)$/);
+  if (creationMatch) { await openPublicCreationRoute(decodeURIComponent(creationMatch[1])); return; }
+  const profileMatch = path.match(/^\/u\/([^/]+)$/);
+  if (profileMatch) { await openCreatorRoute(decodeURIComponent(profileMatch[1]), { updateHistory: false }); return; }
+  setMode('playground');
+}
+
+async function openPublicCreationRoute(identifier) {
+  setMode('community');
+  state.communityRenderEpoch = (state.communityRenderEpoch || 0) + 1;
+  elements.communityDetail.innerHTML = '<p class="community-state" role="status">Loading creation…</p>';
+  try {
+    let creation = findCommunityDesign(identifier);
+    if (!creation && communityAuth.cloudRepo?.getPublicCreation) creation = await communityAuth.cloudRepo.getPublicCreation(identifier);
+    if (!creation || creation.visibility !== 'public') throw Object.assign(new Error('This creation is unavailable or private.'), { status: 404 });
+    state.publicCreations = [creation, ...state.publicCreations.filter((item) => item.id !== creation.id)];
+    state.selectedCommunityId = creation.id;
+    if (communityAuth.cloudRepo?.listPublicComments && !creation.id.startsWith('famous-')) {
+      const result = await communityAuth.cloudRepo.listPublicComments(creation.slug || creation.id);
+      state.communityComments[creation.id] = result.comments || [];
+    }
+    renderCommunityDetail(creation);
+    document.title = `${creation.title} by ${creation.ownerName} · Life Lab`;
+  } catch (error) {
+    elements.communityDetail.innerHTML = `<div class="community-state"><h2>Creation unavailable</h2><p>${escapeHtml(getErrorMessage(error))}</p><button type="button" data-community-action="browse">Browse Community</button></div>`;
+  }
+}
+
+async function openCreatorRoute(username, { updateHistory = true } = {}) {
+  if (!username) return;
+  if (updateHistory) navigateTo(`/u/${encodeURIComponent(username)}`, { render: false });
+  setMode('community');
+  state.communityRenderEpoch = (state.communityRenderEpoch || 0) + 1;
+  elements.communityDetail.innerHTML = '<p class="community-state" role="status">Loading creator…</p>';
+  try {
+    if (!communityAuth.cloudRepo?.getPublicProfile) throw Object.assign(new Error('Creator profiles require the configured Community service.'), { status: 503 });
+    const profile = await communityAuth.cloudRepo.getPublicProfile(username);
+    state.publicProfile = profile;
+    state.publicCreations = [...(profile.creations || []), ...state.publicCreations.filter((item) => !(profile.creations || []).some((creation) => creation.id === item.id))];
+    elements.communityDetail.innerHTML = `<div class="account-route-heading"><button type="button" data-community-action="browse">← Browse</button><span>Creator</span></div><h2>${escapeHtml(profile.displayName)}</h2><p>${escapeHtml(profile.bio || 'This builder has not added a bio yet.')}</p><p>${profile.creations?.length || 0} public creations</p>`;
+    renderCommunityList(elements.communityList, profile.creations || [], 'This creator has no public creations.', { source: 'new' });
+    document.title = `${profile.displayName} · Life Lab`;
+  } catch (error) {
+    elements.communityDetail.innerHTML = `<div class="community-state"><h2>Creator unavailable</h2><p>${escapeHtml(getErrorMessage(error))}</p><button type="button" data-community-action="browse">Browse Community</button></div>`;
+  }
+}
+
 function selectDevComponent(componentId) {
   const component = devComponents[componentId];
 
@@ -1938,17 +2446,89 @@ function selectDevComponent(componentId) {
 
 function runDevDemo(demo) {
   const demoMessages = {
-    and: 'AND demo: use two signal lanes and check the output only when both arrive. First build block: stamp two Signals, then a Collide target.',
-    or: 'OR demo: either input lane may produce output. First build block: stamp two Signals aimed toward one output lane.',
-    xor: 'XOR demo: one input gives output; two inputs cancel or redirect. Use Collision Pair as the starter seed.',
-    adder: 'Adder plan: half-adder needs XOR for sum and AND for carry. Build XOR and AND demos first, then wire their outputs.',
+    and: 'Open the verified AND experiment below, set both finite inputs, and run until its probe settles.',
+    or: 'Open the verified OR experiment below, set either finite input, and run until its probe settles.',
+    adder: 'Open the verified binary half-adder experiment. It exposes independently measured Sum and Carry probes.',
   };
 
   if (demo === 'and' || demo === 'or') selectDevComponent('glider');
-  if (demo === 'xor') selectDevComponent('collision-pair');
-  if (demo === 'adder') selectDevComponent('gosper-gun');
+  if (demo === 'adder') openCircuitExperiment('half-adder');
 
   elements.devOutput.textContent = demoMessages[demo] || 'Choose a logic demo.';
+}
+
+function renderCircuitExperiments() {
+  if (!elements.circuitExperiments) return;
+  elements.circuitExperiments.innerHTML = circuitExperiments.map((experiment) => `
+    <article class="circuit-card" data-circuit-id="${experiment.id}">
+      <strong>${experiment.title}</strong>
+      <p>${experiment.description}</p>
+      <div class="circuit-ports">${experiment.inputs.map((input) => `<label>${input.toUpperCase()} <input type="checkbox" data-circuit-input="${input}" /></label>`).join('')}</div>
+      <button type="button" data-open-circuit="${experiment.id}">Try on board</button>
+      <button type="button" data-run-circuit="${experiment.id}">Run to output · ${experiment.observeGeneration}</button>
+      <output data-circuit-output="${experiment.id}">Choose inputs. Output settles at generation ${experiment.observeGeneration}.</output>
+    </article>`).join('');
+  elements.circuitExperiments.addEventListener('change', (event) => {
+    const card = event.target.closest('[data-circuit-id]');
+    if (!card || !event.target.matches('[data-circuit-input]')) return;
+    state.circuitInputs[card.dataset.circuitId] ||= {};
+    state.circuitInputs[card.dataset.circuitId][event.target.dataset.circuitInput] = event.target.checked;
+  });
+  elements.circuitExperiments.addEventListener('click', (event) => {
+    const open = event.target.closest('[data-open-circuit]');
+    const run = event.target.closest('[data-run-circuit]');
+    if (open) openCircuitExperiment(open.dataset.openCircuit);
+    if (run) runCircuitExperiment(run.dataset.runCircuit);
+  });
+}
+
+function circuitInput(id) {
+  return state.circuitInputs[id] || {};
+}
+
+function openCircuitExperiment(id) {
+  const experiment = buildCircuitExperiment(id, circuitInput(id));
+  state.circuit = experiment;
+  state.designSettings = mergeDesignSettings(state.designSettings, { width: experiment.board.width, height: experiment.board.height, wrapping: false });
+  replaceBoard(ownedSnapshot(experiment.board), { center: true });
+  state.authoredStart = ownedSnapshot(experiment.authoredBoard);
+  state.history.clear();
+  loadSimulation(state.board, { wrapping: false });
+  setMode('dev');
+  state.devProjectActive = true;
+  elements.devOutput.textContent = `${experiment.title} is editable. Ports are marked by the experiment panel; output is measured at generation ${experiment.observeGeneration}.`;
+  showToast(`${experiment.title} loaded`, { kind: 'success' });
+}
+
+async function runCircuitExperiment(id) {
+  state.playing = false;
+  updatePlayButton();
+  if (state.circuit?.id !== id) openCircuitExperiment(id);
+  const experiment = state.circuit;
+  const cardOutput = elements.circuitExperiments.querySelector(`[data-circuit-output="${id}"]`);
+  cardOutput.textContent = `Running finite signal train to generation ${experiment.observeGeneration}…`;
+  try {
+    const load = state.simulationLoad;
+    await load;
+    if (load !== state.simulationLoad) return;
+    if (state.board.generation > experiment.observeGeneration) {
+      cardOutput.textContent = 'This board has passed the observation generation. Reset before running to output.';
+      return;
+    }
+    const remaining = Math.max(0, experiment.observeGeneration - state.board.generation);
+    const snapshot = remaining ? await state.simulation.advance(remaining, {
+      onSnapshot: (board) => {
+        state.board = ownedSnapshot(board);
+        updateStats();
+      },
+    }) : ownedSnapshot();
+    state.board = ownedSnapshot(snapshot);
+    const outputs = readCircuitOutputs(experiment, state.board);
+    cardOutput.textContent = outputs.map((output) => `${output.label}: ${output.high ? 'HIGH' : 'LOW'} (${output.population} cells)`).join(' · ');
+    elements.devOutput.textContent = `Settled output: ${cardOutput.textContent}. Measured from real probe cells.`;
+  } catch (error) {
+    cardOutput.textContent = `Circuit run stopped: ${getErrorMessage(error)}`;
+  }
 }
 
 function runDevClaim(claim) {
@@ -2016,27 +2596,17 @@ async function saveIntroProfileFromFields({ requireProfile = false } = {}) {
   }
 }
 
-async function saveCurrentCreation({ publish = false } = {}) {
-  if (publish && requiresCloudSignInForSharedAction()) {
-    showSignInRequired('publish');
-    return null;
-  }
+async function saveCurrentCreation({ publish = false, resumed = false } = {}) {
+  if (publish && ['validating', 'publishing'].includes(state.publishStatus)) return null;
 
-  if (!communityState.profile) {
+  if (!communityState.profile && isCloudCommunityActive()) {
     elements.communityOutput.textContent = isCloudCommunityActive()
       ? 'Cloud profile is still syncing. Try again in a moment.'
-      : 'Create a local account before saving this board.';
+      : 'Your local draft is ready to save.';
     return null;
   }
 
-  if (publish && !hasPublishMetadata()) {
-    elements.communityOutput.textContent = 'Add a title, description, and at least one tag before publishing.';
-    elements.devOutput.textContent = 'Publish needs a title, description, and tags.';
-    showToast('Add publish details first', { kind: 'warning' });
-    return null;
-  }
-
-  const coordinates = getLiveCoordinates();
+  const authored = ownedSnapshot(state.authoredStart || state.board);
   const editingInDev = state.devProjectActive && state.activeDesignSession?.kind === 'editing';
   const activeCreationId = editingInDev ? state.activeDesignSession?.creationId : null;
   const title = editingInDev
@@ -2052,14 +2622,35 @@ async function saveCurrentCreation({ publish = false } = {}) {
     tags,
     attribution: editingInDev ? elements.devDesignAttribution.value : '',
     tutorialReference: editingInDev ? elements.devDesignTutorial.value : '',
-    rle: encodeRle(coordinates),
-    width: state.board.width,
-    height: state.board.height,
-    generation: state.board.generation,
-    population: coordinates.length,
-    thumbnail: captureBoardThumbnail(),
+    rle: boardToRle(authored),
+    width: authored.width,
+    height: authored.height,
+    generation: 0,
+    population: authored.population,
+    previewConfig: getCurrentCreationPreviewConfig(),
     settings: getCurrentDesignSettings(),
   };
+  if (publish) {
+    setPublishStatus('validating');
+    const readiness = getCreationPublishReadiness({
+      ...input,
+      currentVersion: { rle: input.rle },
+    });
+    if (!readiness.ready) {
+      const message = readiness.issues[0]?.message || 'Add publish details first.';
+      setPublishStatus('failed');
+      elements.communityOutput.textContent = message;
+      elements.devOutput.textContent = message;
+      showToast(message, { kind: 'warning' });
+      return null;
+    }
+    if (requiresCloudSignInForSharedAction()) {
+      setPublishStatus('draft');
+      if (!resumed) queueAccountAction('publish', {}, 'Sign in to publish this design. Your editor state will stay exactly where it is.');
+      return null;
+    }
+    setPublishStatus('publishing');
+  }
   let creation;
   setSaveStatus('saving');
   try {
@@ -2071,6 +2662,7 @@ async function saveCurrentCreation({ publish = false } = {}) {
       creation = await community.createCreation(input, { publish });
     }
   } catch (error) {
+    if (publish) setPublishStatus('failed');
     setSaveStatus(navigator.onLine === false ? 'offline' : 'failed');
     elements.communityOutput.textContent = error.name === 'QuotaExceededError'
       ? 'Could not save: browser storage is full. Remove some builds and try again.'
@@ -2079,6 +2671,7 @@ async function saveCurrentCreation({ publish = false } = {}) {
   }
 
   if (!creation) {
+    if (publish) setPublishStatus('failed');
     setSaveStatus('failed');
     return null;
   }
@@ -2088,6 +2681,7 @@ async function saveCurrentCreation({ publish = false } = {}) {
     state.activeDesignSession.title = creation.title;
   }
   setDesignMetadataFields(creation);
+  setPublishStatus(creation.visibility === 'public' ? 'published' : 'draft');
   syncCommunity();
   markDesignDirty(false);
   clearLocalRecovery();
@@ -2103,15 +2697,6 @@ async function saveCurrentCreation({ publish = false } = {}) {
   return creation;
 }
 
-function hasPublishMetadata() {
-  const editingInDev = state.devProjectActive && state.activeDesignSession?.kind === 'editing';
-  return Boolean(
-    (editingInDev ? elements.devDesignTitle.value : elements.creationTitle.value).trim()
-      && (editingInDev ? elements.devDesignDescription.value : elements.creationDescription.value).trim()
-      && (editingInDev ? elements.devDesignTags.value : elements.creationTags.value).trim(),
-  );
-}
-
 async function publishActiveCreation() {
   await saveCurrentCreation({ publish: true });
 }
@@ -2125,6 +2710,7 @@ async function unpublishActiveCreation() {
     if (!creation) return;
     syncCommunity();
     setSaveStatus('saved');
+    setPublishStatus('unpublished');
     elements.devOutput.textContent = `${creation.title} is now private.`;
     showToast('Design unpublished', { kind: 'success' });
   } catch (error) {
@@ -2188,11 +2774,17 @@ async function restoreActiveVersion(versionId) {
 }
 
 async function copySharePayload() {
-  const active = getActiveCreation() || await saveCurrentCreation();
+  const active = getActiveCreation();
 
   if (!active) return;
 
-  const link = encodeShareLink(active, { origin: window.location.origin + window.location.pathname });
+  if (active.visibility !== 'public' || !active.slug) {
+    elements.communityOutput.textContent = 'Publish this design before copying its public link.';
+    showToast('Publish before sharing', { kind: 'warning' });
+    return;
+  }
+
+  const link = `${window.location.origin}/c/${encodeURIComponent(active.slug)}`;
 
   try {
     await navigator.clipboard.writeText(link);
@@ -2255,12 +2847,15 @@ function loadCreationOntoBoard(creation, { center = true } = {}) {
       width: version.width || state.board.width,
       height: version.height || state.board.height,
     });
-  const pattern = parseRle(version.rle);
-  const nextBoard = createBoard(version.width || settings.width, version.height || settings.height);
+  const nextBoard = boardFromRle(version.rle, {
+    generation: Number(version.generation || 0),
+    width: version.width || settings.width,
+    height: version.height || settings.height,
+  });
 
   state.designSettings = settings;
-  state.board = placePattern(nextBoard, pattern.coordinates, 0, 0);
-  state.board.generation = Number(version.generation || 0);
+  replaceBoard(nextBoard);
+  state.authoredStart = ownedSnapshot(nextBoard);
   resetBoardStorage();
   markLivingCells(230, 1);
   if (center) centerWorld();
@@ -2271,9 +2866,9 @@ function loadCreationOntoBoard(creation, { center = true } = {}) {
   updateStats();
 }
 
-async function starCommunityCreation(creationId) {
+async function starCommunityCreation(creationId, { resumed = false } = {}) {
   if (requiresCloudSignInForSharedAction()) {
-    showSignInRequired('star');
+    if (!resumed) queueAccountAction('favorite-creation', { creationId }, 'Sign in to save this creation to Favorites.');
     return;
   }
 
@@ -2292,9 +2887,13 @@ async function starCommunityCreation(creationId) {
   }
 
   syncCommunity();
-  elements.communityOutput.textContent = nextCreation.starredBy.includes(communityState.profile.id)
+  const starred = nextCreation.starredByViewer
+    ?? nextCreation.starredBy?.includes(communityState.profile.id)
+    ?? false;
+  elements.communityOutput.textContent = starred
     ? `Starred ${nextCreation.title}.`
     : `Removed star from ${nextCreation.title}.`;
+  return nextCreation;
 }
 
 async function cloneCommunityCreation(creationId) {
@@ -2323,6 +2922,8 @@ async function cloneCommunityCreation(creationId) {
 }
 
 async function renderCommunity() {
+  const renderEpoch = (state.communityRenderEpoch || 0) + 1;
+  state.communityRenderEpoch = renderEpoch;
   renderCommunityAuth();
   renderPlayerCard();
   syncCommunityFilterUi();
@@ -2341,12 +2942,34 @@ async function renderCommunity() {
   const ownCreations = communityState.profile
     ? communityState.creations.filter((creation) => creation.ownerId === communityState.profile.id)
     : communityState.creations;
-  const trending = await community.listTrendingCreations();
+  let trending = await community.listTrendingCreations();
+  if (state.communityRenderEpoch !== renderEpoch) return;
+  if (communityAuth.cloudRepo?.listPublicCreations) {
+    state.communityLoadStatus = 'loading';
+    try {
+      const feed = await communityAuth.cloudRepo.listPublicCreations({ q: state.communitySearch, favorites: state.communityFilter === 'favorites' ? 'true' : '', limit: '48' });
+      if (state.communityRenderEpoch !== renderEpoch) return;
+      state.publicCreations = feed.creations || [];
+      if (state.communityFilter === 'favorites' && communityAuth.cloudRepo.getPatternFavorites) {
+        state.patternFavorites = await communityAuth.cloudRepo.getPatternFavorites();
+        if (state.communityRenderEpoch !== renderEpoch) return;
+      }
+      trending = state.publicCreations;
+      state.communityLoadStatus = 'ready';
+    } catch (error) {
+      state.communityLoadStatus = error.status === 401 ? 'auth-required' : 'unavailable';
+      if (state.communityFilter !== 'favorites') elements.communityOutput.textContent = `Community service unavailable: ${getErrorMessage(error)} Device drafts and presets are still available.`;
+    }
+  }
   const famous = getFamousCommunityDesigns();
-  const newest = [...ownCreations].sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
-  const remixes = communityState.creations.filter((creation) => creation.remixedFromId);
+  const newest = [...state.publicCreations, ...ownCreations.filter((creation) => creation.visibility === 'public')].filter((creation, index, all) => all.findIndex((item) => item.id === creation.id) === index)
+    .sort((left, right) => String(right.updatedAt).localeCompare(String(left.updatedAt)));
+  const remixes = newest.filter((creation) => creation.remixedFromId);
 
-  renderCommunityList(elements.communityFamousList, famous, 'Famous designs will appear here.', { source: 'famous' });
+  const shownFamous = state.communityFilter === 'favorites'
+    ? famous.filter((creation) => state.patternFavorites.includes(creation.id.slice(7)))
+    : famous;
+  renderCommunityList(elements.communityFamousList, shownFamous, state.communityFilter === 'favorites' ? 'No preset favorites yet.' : 'Famous designs will appear here.', { source: state.communityFilter === 'favorites' ? 'favorites' : 'famous' });
   renderCommunityList(elements.trendingList, trending, 'Publish a build to start the trending list.', { source: 'trending' });
   renderCommunityList(elements.communityList, newest, 'No saved builds yet.', { source: 'new' });
   renderCommunityList(elements.communityRemixList, remixes, 'Copy or remix a design to start a lineage.', { source: 'remixes' });
@@ -2359,6 +2982,8 @@ async function renderCommunity() {
 
 function setCommunityFilter(value) {
   state.communityFilter = value || 'all';
+  const targetPath = state.communityFilter === 'favorites' ? '/community/favorites' : '/community';
+  if (window.location.pathname !== targetPath) window.history.pushState({}, '', targetPath);
   if (elements.communityFilter) elements.communityFilter.value = state.communityFilter;
   syncCommunityFilterUi();
   renderCommunity();
@@ -2418,7 +3043,7 @@ function renderDevStudio() {
   const activeCreation = state.activeDesignSession?.creationId
     ? community.findCreation(state.activeDesignSession.creationId)
     : null;
-  if (activeCreation) setDesignMetadataFields(activeCreation);
+  if (activeCreation && !state.designDirty) setDesignMetadataFields(activeCreation);
   if (elements.devSessionState) {
     elements.devSessionState.textContent = activeCreation
       ? `Version ${activeCreation.currentVersion?.versionNumber || 1}`
@@ -2546,7 +3171,8 @@ function renderCommunityList(container, creations, emptyText, { source }) {
     card.tabIndex = 0;
     card.setAttribute('role', 'button');
     card.setAttribute('aria-label', `Preview ${creation.title}`);
-    const starred = communityState.profile && creation.starredBy?.includes(communityState.profile.id);
+    const starred = creation.starredByViewer
+      ?? (communityState.profile && creation.starredBy?.includes(communityState.profile.id));
     card.innerHTML = `
       <button class="community-preview" type="button" data-community-action="detail" data-creation-id="${creation.id}" aria-label="View ${escapeHtml(creation.title)}">
         ${getCommunityPreviewHtml(creation)}
@@ -2576,26 +3202,10 @@ function renderCommunityList(container, creations, emptyText, { source }) {
 
 function getCommunityPreviewHtml(creation) {
   try {
-    const pattern = parseRle(creation.currentVersion?.rle || '');
-    const bounds = getPatternBounds(pattern.coordinates);
-    const columns = Math.min(18, Math.max(6, bounds.width));
-    const rows = Math.min(12, Math.max(5, bounds.height));
-    const cells = new Set();
-
-    for (const [x, y] of pattern.coordinates) {
-      const scaledX = bounds.width <= 1 ? 0 : Math.round((x - bounds.minX) / (bounds.width - 1) * (columns - 1));
-      const scaledY = bounds.height <= 1 ? 0 : Math.round((y - bounds.minY) / (bounds.height - 1) * (rows - 1));
-      cells.add(`${scaledX},${scaledY}`);
-    }
-
-    return `
-      <span class="preview-grid" style="--preview-cols:${columns};--preview-rows:${rows}">
-        ${[...cells].map((cell) => {
-    const [x, y] = cell.split(',').map(Number);
-    return `<span style="grid-column:${x + 1};grid-row:${y + 1}"></span>`;
-  }).join('')}
-      </span>
-    `;
+    const preview = creation.previewConfig?.version === 1
+      ? creation.previewConfig
+      : createCreationPreviewConfig(creation);
+    return getPreviewGridHtml(preview);
   } catch {
     return '<span class="preview-grid preview-grid-empty"></span>';
   }
@@ -2603,7 +3213,8 @@ function getCommunityPreviewHtml(creation) {
 
 function getFilteredCommunityItems(creations, source) {
   const filter = state.communityFilter;
-  if (filter !== 'all' && filter !== source) return [];
+  if (filter === 'favorites' && !['trending', 'favorites'].includes(source)) return [];
+  if (!['all', 'favorites'].includes(filter) && filter !== source) return [];
 
   const query = state.communitySearch.trim().toLowerCase();
   if (!query) return creations;
@@ -2716,7 +3327,8 @@ function getFamousCommunityDesigns() {
 function findCommunityDesign(creationId) {
   if (!creationId) return null;
   return community.findCreation(creationId)
-    || getFamousCommunityDesigns().find((creation) => creation.id === creationId)
+    || state.publicCreations.find((creation) => creation.id === creationId || creation.slug === creationId)
+    || getFamousCommunityDesigns().find((creation) => creation.id === creationId || creation.slug === creationId)
     || null;
 }
 
@@ -2739,7 +3351,7 @@ function renderCommunityDetail(creation) {
     : 'Original or historical design';
 
   elements.communityDetail.innerHTML = `
-    <div class="detail-preview" aria-hidden="true">${getCommunityPreviewHtml(creation)}</div>
+    <div class="detail-preview" role="img" aria-label="${escapeHtml(getCreationPreviewAltText(creation))}">${getCommunityPreviewHtml(creation)}</div>
     <div class="section-heading">
       <h2>${escapeHtml(creation.title)}</h2>
       <span>${creation.starCount || 0} stars</span>
@@ -2747,7 +3359,7 @@ function renderCommunityDetail(creation) {
     <p>${escapeHtml(creation.description || 'No description yet.')}</p>
     <div class="community-tags">${(creation.tags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
     <dl class="detail-stats">
-      <div><dt>Author</dt><dd>${escapeHtml(creation.ownerName)}</dd></div>
+      <div><dt>Author</dt><dd><button class="creator-link" type="button" data-community-action="creator" data-username="${escapeHtml(creation.ownerUsername || '')}">${escapeHtml(creation.ownerName)}</button></dd></div>
       <div><dt>Grid</dt><dd>${creation.currentVersion?.width || 0} x ${creation.currentVersion?.height || 0}</dd></div>
       <div><dt>Cells</dt><dd>${creation.currentVersion?.population || 0}</dd></div>
       <div><dt>Lineage</dt><dd>${escapeHtml(lineage)}</dd></div>
@@ -2757,6 +3369,7 @@ function renderCommunityDetail(creation) {
       <button type="button" data-community-action="edit-copy" data-creation-id="${creation.id}">${actionCopy.edit}</button>
       <button type="button" data-community-action="copy" data-creation-id="${creation.id}">${actionCopy.share}</button>
       <button type="button" data-community-action="remix" data-creation-id="${creation.id}">Remix</button>
+      <button type="button" data-community-action="report" data-creation-id="${creation.id}">Report</button>
     </div>
     <div class="comments-list">
       <h3>Comments ${comments.length}</h3>
@@ -2778,10 +3391,23 @@ async function handleCommunityAction(event) {
 
   const { communityAction, creationId } = button.dataset;
 
+  if (communityAction === 'browse') {
+    document.title = "Conway's Game Explorer";
+    navigateTo('/community');
+    return;
+  }
+
   if (communityAction === 'detail') {
     state.selectedCommunityId = creationId;
     renderCommunityDetail(findCommunityDesign(creationId));
     syncCommunitySelection();
+    const creation = findCommunityDesign(creationId);
+    if (creation?.visibility === 'public' && creation.slug) navigateTo(`/c/${encodeURIComponent(creation.slug)}`, { render: false });
+    return;
+  }
+
+  if (communityAction === 'creator') {
+    if (button.dataset.username) await openCreatorRoute(button.dataset.username);
     return;
   }
 
@@ -2797,8 +3423,17 @@ async function handleCommunityAction(event) {
 
   if (communityAction === 'star') {
     if (creationId.startsWith('famous-')) {
-      showToast('Starred historical design', { kind: 'success' });
-      elements.communityOutput.textContent = 'Historical design starred locally for this session.';
+      if (requiresCloudSignInForSharedAction()) {
+        queueAccountAction('favorite-pattern', { patternId: creationId.slice(7) }, 'Sign in to save this preset to Favorites.');
+      } else if (isCloudCommunityActive()) {
+        const patternId = creationId.slice(7);
+        await community.setPatternFavorite(patternId, true);
+        state.patternFavorites = [...new Set([...state.patternFavorites, patternId])];
+        showToast('Preset saved to Favorites', { kind: 'success' });
+      } else {
+        showToast('Favorite needs a configured account', { kind: 'warning' });
+        elements.communityOutput.textContent = 'Favorites sync is unavailable in this local build. You can still play or remix this preset.';
+      }
       return;
     }
     await starCommunityCreation(creationId);
@@ -2814,6 +3449,14 @@ async function handleCommunityAction(event) {
 
   if (communityAction === 'remix') {
     await remixCommunityDesign(creationId);
+    return;
+  }
+  if (communityAction === 'report') {
+    if (requiresCloudSignInForSharedAction()) { queueAccountAction('report', { creationId }, 'Sign in to report this creation.'); return; }
+    const reason = window.prompt('Describe the issue (5–2000 characters):');
+    if (!reason) return;
+    try { await community.reportCreation(creationId, reason); showToast('Report received', { kind: 'success' }); }
+    catch (error) { elements.communityOutput.textContent = `Could not report: ${getErrorMessage(error)}`; }
   }
 }
 
@@ -2939,7 +3582,9 @@ async function copyCommunityDesign(creationId) {
   const creation = findCommunityDesign(creationId);
   if (!creation) return;
 
-  const link = encodeShareLink(creation, { origin: window.location.origin + window.location.pathname });
+  const link = creation.visibility === 'public' && creation.slug
+    ? `${window.location.origin}/c/${encodeURIComponent(creation.slug)}`
+    : encodeShareLink(creation, { origin: window.location.origin + window.location.pathname });
   try {
     await navigator.clipboard.writeText(link);
     triggerHaptic('copy');
@@ -2957,8 +3602,24 @@ async function remixCommunityDesign(creationId) {
   if (!creation) return;
 
   if (!communityState.profile) {
-    elements.communityOutput.textContent = 'Create a profile before remixing designs.';
-    showToast('Create a profile first', { kind: 'warning' });
+    try {
+      const remix = await localCommunity.saveCreation({
+        ...toCommunityCopyInput(creation),
+        title: `${creation.title} Remix`,
+        attribution: `Remixed from ${creation.title} by ${creation.ownerName}.`,
+        parentCreation: creation,
+      });
+      community = localCommunity;
+      communityState = localCommunity.getState();
+      loadCreationOntoBoard(remix, { center: true });
+      startDevProject('design', { title: remix.title, creationId: remix.id, source: creation, boardLoaded: true, openTools: true });
+      setDesignMetadataFields(remix);
+      navigateTo('/studio');
+      elements.devOutput.textContent = `Private guest remix of ${creation.title}. Sign in only when you want to publish.`;
+      showToast('Guest remix ready', { kind: 'success' });
+    } catch (error) {
+      elements.communityOutput.textContent = `Could not remix design: ${getErrorMessage(error)}`;
+    }
     return;
   }
 
@@ -2978,7 +3639,7 @@ async function remixCommunityDesign(creationId) {
       });
       syncCommunity();
       loadCreationOntoBoard(remix, { center: true });
-      setMode('dev');
+      navigateTo('/studio');
       elements.communityOutput.textContent = `Created a private remix of ${creation.title}.`;
       showToast('Remix draft created', { kind: 'success' });
     } catch (error) {
@@ -2991,19 +3652,40 @@ async function remixCommunityDesign(creationId) {
   const remix = community.findCreation(community.getState().activeCreationId);
   if (remix) {
     loadCreationOntoBoard(remix, { center: true });
-    setMode('dev');
+    navigateTo('/studio');
     showToast('Remix draft created', { kind: 'success' });
   }
 }
 
-function postCommunityComment() {
-  const creation = findCommunityDesign(state.selectedCommunityId);
+async function postCommunityComment({ body: resumedBody, creationId: resumedCreationId, resumed = false } = {}) {
+  const creation = findCommunityDesign(resumedCreationId || state.selectedCommunityId);
   if (!creation) {
     showToast('Select a design first', { kind: 'warning' });
     return;
   }
 
-  const body = elements.commentBody.value;
+  const body = resumedBody ?? elements.commentBody.value;
+  if (!String(body).trim()) {
+    showToast('Write a comment first', { kind: 'warning' });
+    return;
+  }
+  if (requiresCloudSignInForSharedAction()) {
+    if (!resumed) queueAccountAction('comment', { creationId: creation.id, body }, 'Sign in to post this comment. The text will be submitted once.');
+    return;
+  }
+  if (isCloudCommunityActive() && !creation.id.startsWith('famous-')) {
+    try {
+      const comment = await community.createComment(creation.id, body);
+      state.communityComments[creation.id] = [comment, ...getCommunityComments(creation)];
+      elements.commentBody.value = '';
+      renderCommunityDetail(creation);
+      showToast('Comment added', { kind: 'success' });
+      return comment;
+    } catch (error) {
+      elements.communityOutput.textContent = `Could not comment: ${getErrorMessage(error)}`;
+      throw error;
+    }
+  }
   const commented = addCreationComment({
     ...creation,
     comments: getCommunityComments(creation),
@@ -3021,6 +3703,7 @@ function postCommunityComment() {
     commentCount: commented.commentCount,
   });
   showToast('Comment added', { kind: 'success' });
+  return commented.comments.at(-1);
 }
 
 function getActiveCreation() {
@@ -3036,12 +3719,95 @@ function getSuggestedCreationTitle() {
   return `Life build ${communityState.creations.length + 1}`;
 }
 
-function captureBoardThumbnail() {
+function getCurrentCreationPreviewConfig() {
+  const coordinates = getLiveCoordinates();
+  if (!coordinates.length) return {};
+  return createCreationPreviewConfig({
+    title: elements.devDesignTitle?.value || elements.creationTitle?.value || getSuggestedCreationTitle(),
+    previewConfig: state.previewConfig,
+    currentVersion: {
+      rle: encodeRle(coordinates),
+      settings: getCurrentDesignSettings(),
+    },
+  });
+}
+
+function getCreationPreviewAltText(creation) {
   try {
-    return canvas.toDataURL('image/png');
+    return (creation.previewConfig?.version === 1
+      ? creation.previewConfig
+      : createCreationPreviewConfig(creation)).altText;
   } catch {
-    return '';
+    return `Preview of ${creation.title}`;
   }
+}
+
+function getPreviewGridHtml(preview) {
+  const columns = Number(preview?.grid?.columns || 6);
+  const rows = Number(preview?.grid?.rows || 5);
+  const background = preview?.colors?.background || '#07090f';
+  const live = preview?.colors?.live || '#5eead4';
+  return `
+    <span class="preview-grid" aria-hidden="true" style="--preview-cols:${columns};--preview-rows:${rows};--preview-background:${background};--preview-live:${live}">
+      ${(preview?.cells || []).map(([x, y]) => `<span style="grid-column:${x + 1};grid-row:${y + 1}"></span>`).join('')}
+    </span>
+  `;
+}
+
+function renderDevPublishPreview() {
+  if (!elements.devPreview) return;
+  try {
+    const preview = getCurrentCreationPreviewConfig();
+    if (!preview.version) throw new Error('empty');
+    state.previewConfig = preview;
+    elements.devPreview.innerHTML = getPreviewGridHtml(preview);
+    elements.devPreview.setAttribute('aria-label', preview.altText);
+    elements.devPreviewMode.textContent = preview.camera.mode === 'current-view' ? 'Current view' : 'Fit pattern';
+    elements.devPreviewDescription.textContent = preview.altText;
+    elements.previewFitPattern?.setAttribute('aria-pressed', String(preview.camera.mode !== 'current-view'));
+    elements.previewUseView?.setAttribute('aria-pressed', String(preview.camera.mode === 'current-view'));
+  } catch {
+    elements.devPreview.innerHTML = '<span class="preview-empty">Add live cells</span>';
+    elements.devPreview.setAttribute('aria-label', 'Add live cells to generate a publishing preview');
+    elements.devPreviewMode.textContent = 'Fit pattern';
+    elements.devPreviewDescription.textContent = 'Add live cells to choose a default camera frame.';
+    elements.previewFitPattern?.setAttribute('aria-pressed', 'true');
+    elements.previewUseView?.setAttribute('aria-pressed', 'false');
+  }
+}
+
+function choosePreviewFrame(mode) {
+  const coordinates = getLiveCoordinates();
+  if (!coordinates.length) {
+    showToast('Add live cells before choosing a preview', { kind: 'warning' });
+    return;
+  }
+  let frame;
+  if (mode === 'current-view') {
+    const bounds = getPatternBounds(coordinates);
+    const viewport = getWorldViewport();
+    const cellSize = getCellSize();
+    frame = {
+      x: Math.floor((viewport.left - state.panX) / cellSize) - bounds.minX,
+      y: Math.floor((viewport.top - state.panY) / cellSize) - bounds.minY,
+      width: Math.ceil(viewport.width / cellSize),
+      height: Math.ceil(viewport.height / cellSize),
+    };
+  }
+  const previous = state.previewConfig;
+  state.previewConfig = {
+    ...previous,
+    camera: { mode, ...(frame ? { frame } : {}) },
+  };
+  const preview = getCurrentCreationPreviewConfig();
+  if (!preview.cells.length) {
+    state.previewConfig = previous;
+    showToast('The current view must include a live cell', { kind: 'warning' });
+    return;
+  }
+  state.previewConfig = preview;
+  renderDevPublishPreview();
+  markDesignDirty(true);
 }
 
 function escapeHtml(value) {
@@ -3100,6 +3866,7 @@ function renderPresets() {
     button.type = 'button';
     button.dataset.presetId = preset.id;
     button.innerHTML = `
+      <canvas class="preset-preview" width="72" height="48" aria-hidden="true"></canvas>
       <span class="preset-topline">
         <span class="preset-name">${preset.name}</span>
         <span class="preset-meta">${getPresetStampSummary(preset)}</span>
@@ -3107,6 +3874,7 @@ function renderPresets() {
       <span class="preset-note">${preset.note}</span>
     `;
     button.draggable = true;
+    drawPresetPreview(button.querySelector('.preset-preview'), preset.coordinates);
     button.addEventListener('click', () => selectPreset(preset));
     button.addEventListener('dragstart', (event) => {
       selectPreset(preset);
@@ -3118,6 +3886,22 @@ function renderPresets() {
   }
 
   elements.presets.append(groupElement);
+}
+
+function drawPresetPreview(canvasElement, coordinates) {
+  if (!canvasElement) return;
+  const preview = canvasElement.getContext('2d');
+  const bounds = getPatternBounds(coordinates);
+  const cell = Math.max(2, Math.min(8, Math.floor(Math.min(58 / Math.max(1, bounds.width), 34 / Math.max(1, bounds.height)))));
+  const width = Math.max(1, bounds.width * cell);
+  const height = Math.max(1, bounds.height * cell);
+  const offsetX = Math.floor((canvasElement.width - width) / 2);
+  const offsetY = Math.floor((canvasElement.height - height) / 2);
+  preview.clearRect(0, 0, canvasElement.width, canvasElement.height);
+  preview.fillStyle = 'rgba(94, 234, 212, 0.08)';
+  preview.fillRect(0, 0, canvasElement.width, canvasElement.height);
+  preview.fillStyle = '#5eead4';
+  for (const [x, y] of coordinates) preview.fillRect(offsetX + x * cell, offsetY + y * cell, Math.max(1, cell - 1), Math.max(1, cell - 1));
 }
 
 function updatePresetSelection() {
@@ -3208,9 +3992,20 @@ function bindEvents() {
     state.pointer.lastX = event.clientX;
     state.pointer.lastY = event.clientY;
 
+    if (state.tool === 'draw') beginAuthoringCommand();
+
     if (state.pointer.mode === 'pan') {
       document.querySelector('.app-shell').classList.add('is-panning');
       elements.activeNote.textContent = getToolStatusMessage({ tool: 'pan' });
+      return;
+    }
+
+    if (state.pointer.mode === 'select') {
+      state.playing = false;
+      loadSimulation();
+      updatePlayButton();
+      state.pointer.selectionStart = screenToCell(event.clientX, event.clientY);
+      updateSelection(event.clientX, event.clientY);
       return;
     }
 
@@ -3228,6 +4023,7 @@ function bindEvents() {
       state.pointer.lastY = event.clientY;
       return;
     }
+    if (state.pointer.mode === 'select') { updateSelection(event.clientX, event.clientY); return; }
     if (state.pointer.mode === 'stamp') return;
 
     applyToolAt(event.clientX, event.clientY);
@@ -3236,6 +4032,12 @@ function bindEvents() {
   canvas.addEventListener('pointerup', (event) => {
     canvas.releasePointerCapture(event.pointerId);
     state.pointer.active = false;
+    if (state.pointer.mode === 'draw' || state.pointer.mode === 'erase') finishAuthoringCommand();
+    if (state.pointer.mode === 'select' && state.pointer.selectionStart) {
+      updateSelection(event.clientX, event.clientY);
+      elements.activeNote.textContent = `Selected ${state.selection.width} × ${state.selection.height}. Use selection controls, arrows to move, R to rotate, or F to reflect.`;
+      state.pointer.selectionStart = null;
+    }
     state.pointer.lastCell = null;
     document.querySelector('.app-shell').classList.remove('is-panning');
   });
@@ -3276,6 +4078,7 @@ function bindEvents() {
 
   elements.playToggle.addEventListener('click', () => {
     state.playing = !state.playing;
+    if (!state.playing) loadSimulation();
     updatePlayButton();
   });
 
@@ -3289,6 +4092,18 @@ function bindEvents() {
 
   elements.randomize.addEventListener('click', () => {
     randomSoup();
+  });
+  document.querySelectorAll('[data-selection-command]').forEach((button) => {
+    button.addEventListener('click', () => selectionCommand(button.dataset.selectionCommand));
+  });
+  elements.undo?.addEventListener('click', undoBoard);
+  elements.redo?.addEventListener('click', redoBoard);
+  elements.resetStart?.addEventListener('click', resetToStart);
+  elements.promoteState?.addEventListener('click', promoteCurrentStateToStart);
+  elements.fitBoard?.addEventListener('click', () => {
+    centerWorld();
+    setZoom(1);
+    elements.activeNote.textContent = 'Board fitted to view.';
   });
 
   elements.toolDrawerToggle?.addEventListener('click', () => {
@@ -3324,6 +4139,8 @@ function bindEvents() {
   });
   elements.devDesignAttribution?.addEventListener('input', () => markDesignDirty(true));
   elements.devDesignTutorial?.addEventListener('input', () => markDesignDirty(true));
+  elements.previewFitPattern?.addEventListener('click', () => choosePreviewFrame('fit-pattern'));
+  elements.previewUseView?.addEventListener('click', () => choosePreviewFrame('current-view'));
 
   elements.stampRotateLeft?.addEventListener('click', () => rotateStamp(-90));
   elements.stampRotateRight?.addEventListener('click', () => rotateStamp(90));
@@ -3352,14 +4169,33 @@ function bindEvents() {
     state.ageColors = elements.ageColors.checked;
   });
 
-  elements.modePlayground.addEventListener('click', () => setMode('playground'));
+  elements.modePlayground.addEventListener('click', () => navigateTo('/'));
 
   elements.modeDev.addEventListener('click', () => {
     state.devProjectActive = Boolean(state.activeDesignSession);
-    setMode('dev');
+    navigateTo('/studio');
   });
 
-  elements.modeCommunity.addEventListener('click', () => setMode('community'));
+  elements.modeCommunity.addEventListener('click', () => navigateTo('/community'));
+
+  elements.accountEntry?.addEventListener('click', () => openAccountDialog());
+  elements.accountTabs?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-account-mode]');
+    if (!button) return;
+    state.accountMode = button.dataset.accountMode;
+    renderAccountDialog();
+  });
+  elements.accountSubmit?.addEventListener('click', submitAccountDialog);
+  elements.accountCreateRecovery?.addEventListener('click', generateRecoveryKey);
+  elements.accountDelete?.addEventListener('click', deleteCurrentAccount);
+  elements.accountDialog?.addEventListener('keydown', trapAccountDialogFocus);
+  elements.accountDialog?.addEventListener('close', () => {
+    const pending = pendingActions.get();
+    if (pending?.attempted) pendingActions.retry(pending.token);
+    if (state.accountDialogTrigger?.isConnected) state.accountDialogTrigger.focus({ preventScroll: true });
+    state.accountDialogTrigger = null;
+  });
+  window.addEventListener('popstate', routeCurrentLocation);
 
   elements.saveProfile.addEventListener('click', () => saveLocalProfile());
 
@@ -3537,11 +4373,29 @@ function bindEvents() {
     if (event.key === ' ') {
       event.preventDefault();
       state.playing = !state.playing;
+      if (!state.playing) loadSimulation();
       updatePlayButton();
     }
     if (event.key === '.') stepSimulation();
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+      event.preventDefault();
+      if (event.shiftKey) redoBoard(); else undoBoard();
+    }
+    const key = event.key.toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && ['c', 'v'].includes(key)) {
+      event.preventDefault();
+      selectionCommand(key === 'c' ? 'copy' : 'paste');
+    }
     if (event.key === '1') chooseTool('draw');
     if (event.key === '2') chooseTool('stamp');
+    if (key === 'r') selectionCommand('rotate');
+    if (key === 'f') selectionCommand('reflect');
+    if (event.key === 'Escape') selectionCommand('clear');
+    const directions = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+    if (state.selection && directions[event.key]) {
+      event.preventDefault();
+      selectionCommand(directions[event.key]);
+    }
   });
   window.addEventListener('offline', () => {
     if (state.designDirty) setSaveStatus('offline');
@@ -3565,10 +4419,14 @@ function loop(timestamp) {
     state.accumulator += delta;
     const interval = 1000 / state.speed;
 
-    while (state.accumulator >= interval) {
+    let processed = 0;
+    while (state.accumulator >= interval && processed < MAX_MAIN_THREAD_CATCH_UP_STEPS) {
       stepSimulation();
       state.accumulator -= interval;
+      processed += 1;
     }
+    // A delayed frame must not run an unlimited backlog on the UI thread.
+    if (state.accumulator >= interval) state.accumulator = interval - 1;
   } else {
     for (let i = 0; i < state.trail.length; i += 1) {
       if (!state.board.cells[i] && state.trail[i] > 0) state.trail[i] = Math.floor(state.trail[i] * 0.98);
@@ -3579,20 +4437,33 @@ function loop(timestamp) {
   requestAnimationFrame(loop);
 }
 
-function boot() {
+async function boot() {
+  communityState = await localCommunity.loadCommunityState();
+  state.simulation = createSimulationClient();
   resizeCanvas();
   centerWorld();
   renderPresets();
+  renderCircuitExperiments();
   renderCommunity();
   updateStats();
   updatePlayButton();
   setMode('playground');
   bindEvents();
-  clearWorld();
+  const glider = findPreset('glider');
+  const gliderBounds = getPatternBounds(glider.coordinates);
+  state.board = placePattern(state.board, glider.coordinates,
+    Math.floor(state.board.width / 2 - gliderBounds.width / 2),
+    Math.floor(state.board.height / 2 - gliderBounds.height / 2));
+  resetBoardStorage();
+  markLivingCells(230, 1);
+  updateStats();
+  elements.activeNote.textContent = 'A glider is ready to explore. Press Play, then make it your own.';
+  state.authoredStart = ownedSnapshot();
+  loadSimulation();
   markDesignDirty(false);
-  const recoveredDraft = restoreLocalRecovery();
+  const recoveredDraft = await restoreLocalRecovery();
   importSharedBuildFromHash();
-  initializeCommunityBackend();
+  initializeCommunityBackend().then(() => routeCurrentLocation());
   mountLandingIntro({
     layer: elements.introLayer,
     canvas: elements.introCanvas,
@@ -3602,14 +4473,14 @@ function boot() {
     title: elements.introCardTitle,
     help: elements.introHelp,
     profileFields: elements.introProfileFields,
+    direct: true,
     onPlayground: () => {
       if (recoveredDraft && !window.location.hash) {
         setMode('dev');
         elements.devOutput.textContent = 'Recovered your unsaved local draft. Save it when you are ready.';
         return;
       }
-      setMode('playground');
-      window.setTimeout(openPlaygroundIntro, 940);
+      routeCurrentLocation();
     },
     onDevelop: async () => {
       const saved = await saveIntroProfileFromFields({ requireProfile: true });

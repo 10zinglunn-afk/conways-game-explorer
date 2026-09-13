@@ -50,3 +50,12 @@ Execution priorities:
   connection resolution, and dry-run bundle validation are complete. Account
   login, Hyperdrive provisioning, migration execution, email delivery, and a
   first permanent deployment remain external setup steps.
+- Phase 2's validated publishing workflow is implemented locally: readiness validates
+  title/description/tags and non-empty RLE in shared code, active repositories
+  allocate deterministic owner-scoped slugs, PostgreSQL prevents incomplete
+  public rows, repeated publish calls preserve the canonical URL/timestamp, and
+  Dev Studio exposes validating/publishing/published/failed/unpublished states.
+  Builders can fit the full pattern or capture the current view as the default
+  camera; deterministic preview cells, theme colors, and accessible fallback
+  text persist through repositories and Community rendering. A live disposable
+  PostgreSQL migration/contract run remains the Phase 2 verification gap.

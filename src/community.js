@@ -2,8 +2,18 @@ import {
   createDesignSettings,
   serializeDesignSettings,
 } from './design-settings.js';
+import { getPatternBounds, parseRle } from './patterns.js';
 
 export const COMMUNITY_STORAGE_KEY = 'life-logic-community-v1';
+export const PUBLISH_LIMITS = Object.freeze({
+  titleMax: 120,
+  descriptionMin: 20,
+  descriptionMax: 2000,
+  tagMax: 8,
+  tagLengthMax: 32,
+  rleBytesMax: 200_000,
+  dimensionMax: 2048,
+});
 
 export function createCommunityState(overrides = {}) {
   return {
@@ -42,6 +52,7 @@ export function createProfile({
 
 export function createCreationDraft({
   id,
+  slug,
   profile,
   title,
   description = '',
@@ -94,7 +105,7 @@ export function createCreationDraft({
   return {
     id: creationId,
     title: cleanTitle,
-    slug: `${slugify(cleanTitle) || 'life-build'}-${getIdSuffix(creationId)}`,
+    slug: slug || `${slugify(cleanTitle) || 'life-build'}-${getIdSuffix(creationId)}`,
     description: String(description || '').trim(),
     attribution: String(attribution || '').trim(),
     tutorialReference: String(tutorialReference || '').trim(),
@@ -194,6 +205,7 @@ export function archiveCreation(creation, { now = () => new Date().toISOString()
   return {
     ...creation,
     visibility: 'private',
+    canonicalUrl: null,
     publishedAt: null,
     archivedAt,
     updatedAt: archivedAt,
@@ -216,20 +228,215 @@ export function getCreationVersions(creation) {
 }
 
 export function publishCreation(creation, { now = () => new Date().toISOString() } = {}) {
+  const readiness = assertCreationPublishReady(creation);
   const publishedAt = creation.publishedAt || now();
 
   return {
     ...creation,
+    previewConfig: createCreationPreviewConfig(creation),
+    publishReadiness: readiness.checks,
     visibility: 'public',
+    canonicalUrl: `/c/${creation.slug}`,
     publishedAt,
     updatedAt: publishedAt,
   };
+}
+
+export function getCreationPublishReadiness(creation) {
+  const issues = [];
+  const title = String(creation?.title || '').trim();
+  const description = String(creation?.description || '').trim();
+  const tags = normalizeTags(creation?.tags, { limit: false });
+  const version = creation?.currentVersion;
+  const rle = String(version?.rle || '');
+  let previewReady = false;
+
+  if (!title) issues.push({ field: 'title', code: 'required', message: 'Add a title.' });
+  if (title.length > PUBLISH_LIMITS.titleMax) {
+    issues.push({ field: 'title', code: 'too_long', message: `Keep the title under ${PUBLISH_LIMITS.titleMax} characters.` });
+  }
+  if (description.length < PUBLISH_LIMITS.descriptionMin) {
+    issues.push({
+      field: 'description',
+      code: 'too_short',
+      message: `Describe what the build does in at least ${PUBLISH_LIMITS.descriptionMin} characters.`,
+    });
+  }
+  if (description.length > PUBLISH_LIMITS.descriptionMax) {
+    issues.push({ field: 'description', code: 'too_long', message: `Keep the description under ${PUBLISH_LIMITS.descriptionMax} characters.` });
+  }
+  if (!tags.length) issues.push({ field: 'tags', code: 'required', message: 'Add at least one tag.' });
+  if (tags.length > PUBLISH_LIMITS.tagMax) {
+    issues.push({ field: 'tags', code: 'too_many', message: `Use no more than ${PUBLISH_LIMITS.tagMax} tags.` });
+  }
+  if (tags.some((tag) => tag.length > PUBLISH_LIMITS.tagLengthMax || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(tag))) {
+    issues.push({
+      field: 'tags',
+      code: 'invalid',
+      message: 'Tags may contain lowercase letters, numbers, and single hyphens.',
+    });
+  }
+
+  const rleBytes = new TextEncoder().encode(rle).byteLength;
+  if (!rle || rleBytes > PUBLISH_LIMITS.rleBytesMax) {
+    issues.push({ field: 'board', code: 'invalid_size', message: 'The board snapshot is missing or too large.' });
+  } else {
+    try {
+      const parsed = parseRle(rle);
+      const coordinatesFitHeader = parsed.coordinates.every(([x, y]) => (
+        x >= 0 && y >= 0 && x < parsed.width && y < parsed.height
+      ));
+      if (!rle.trim().endsWith('!') || !coordinatesFitHeader) {
+        issues.push({ field: 'board', code: 'invalid_rle', message: 'The board snapshot is not valid RLE.' });
+      } else if (!parsed.coordinates.length) {
+        issues.push({ field: 'board', code: 'empty', message: 'Add at least one live cell before publishing.' });
+      } else if (parsed.width < 1 || parsed.height < 1
+        || parsed.width > PUBLISH_LIMITS.dimensionMax
+        || parsed.height > PUBLISH_LIMITS.dimensionMax) {
+        issues.push({
+          field: 'board',
+          code: 'invalid_dimensions',
+          message: `Published patterns must fit within ${PUBLISH_LIMITS.dimensionMax} × ${PUBLISH_LIMITS.dimensionMax}.`,
+        });
+      } else {
+        previewReady = createCreationPreviewConfig(creation).cells.length > 0;
+      }
+    } catch {
+      issues.push({ field: 'board', code: 'invalid_rle', message: 'The board snapshot is not valid RLE.' });
+    }
+  }
+
+  if (!issues.some((issue) => issue.field === 'board') && !previewReady) {
+    issues.push({
+      field: 'preview',
+      code: 'invalid',
+      message: 'Choose a preview frame that includes at least one live cell.',
+    });
+  }
+
+  return {
+    ready: issues.length === 0,
+    issues,
+    checks: {
+      metadata: !issues.some((issue) => ['title', 'description', 'tags'].includes(issue.field)),
+      board: !issues.some((issue) => issue.field === 'board'),
+      preview: previewReady && !issues.some((issue) => issue.field === 'preview'),
+    },
+  };
+}
+
+export function createCreationPreviewConfig(creation, { cameraMode, frame } = {}) {
+  const pattern = parseRle(creation?.currentVersion?.rle || creation?.rle || '');
+  const coordinates = pattern.coordinates;
+  const bounds = getPatternBounds(coordinates);
+  const existing = normalizeObject(creation?.previewConfig);
+  const mode = cameraMode || existing.camera?.mode || 'fit-pattern';
+  const requestedFrame = frame || existing.camera?.frame;
+  const cameraFrame = mode === 'current-view'
+    ? normalizePreviewFrame(requestedFrame, pattern, bounds)
+    : getFittedPreviewFrame(pattern, bounds);
+  const { columns, rows } = getPreviewGridSize(cameraFrame);
+  const visibleCoordinates = coordinates.filter(([x, y]) => (
+    x >= cameraFrame.x
+    && y >= cameraFrame.y
+    && x < cameraFrame.x + cameraFrame.width
+    && y < cameraFrame.y + cameraFrame.height
+  ));
+  const cells = [...new Set(visibleCoordinates.map(([x, y]) => {
+    const scaledX = cameraFrame.width <= 1
+      ? 0
+      : Math.round((x - cameraFrame.x) / (cameraFrame.width - 1) * (columns - 1));
+    const scaledY = cameraFrame.height <= 1
+      ? 0
+      : Math.round((y - cameraFrame.y) / (cameraFrame.height - 1) * (rows - 1));
+    return `${scaledX},${scaledY}`;
+  }))]
+    .map((cell) => cell.split(',').map(Number))
+    .sort(([ax, ay], [bx, by]) => ay - by || ax - bx);
+  const title = String(creation?.title || 'Untitled Life build').trim() || 'Untitled Life build';
+  const visibleCount = visibleCoordinates.length;
+  const totalCount = coordinates.length;
+  const countLabel = visibleCount === totalCount
+    ? `${totalCount} live ${totalCount === 1 ? 'cell' : 'cells'}`
+    : `${visibleCount} of ${totalCount} live cells`;
+  const settings = creation?.currentVersion?.settings || creation?.settings || {};
+
+  return {
+    version: 1,
+    camera: { mode, frame: cameraFrame },
+    grid: { columns, rows },
+    cells,
+    colors: {
+      background: normalizePreviewColor(settings.backgroundColor, '#07090f'),
+      live: normalizePreviewColor(settings.liveCellColor, '#5eead4'),
+    },
+    altText: `Preview of ${title}: ${countLabel} in a ${cameraFrame.width} by ${cameraFrame.height} frame.`,
+  };
+}
+
+function getFittedPreviewFrame(pattern, bounds) {
+  const padding = 1;
+  const x = Math.max(0, bounds.minX - padding);
+  const y = Math.max(0, bounds.minY - padding);
+  return {
+    x,
+    y,
+    width: Math.max(1, Math.min(pattern.width - x, bounds.width + padding * 2)),
+    height: Math.max(1, Math.min(pattern.height - y, bounds.height + padding * 2)),
+  };
+}
+
+function normalizePreviewFrame(frame, pattern, bounds) {
+  if (!frame || !Number.isFinite(Number(frame.x)) || !Number.isFinite(Number(frame.y))) {
+    return getFittedPreviewFrame(pattern, bounds);
+  }
+  const x = Math.max(0, Math.min(pattern.width - 1, Math.floor(Number(frame.x))));
+  const y = Math.max(0, Math.min(pattern.height - 1, Math.floor(Number(frame.y))));
+  return {
+    x,
+    y,
+    width: Math.max(1, Math.min(pattern.width - x, Math.floor(Number(frame.width)) || 1)),
+    height: Math.max(1, Math.min(pattern.height - y, Math.floor(Number(frame.height)) || 1)),
+  };
+}
+
+function getPreviewGridSize(frame) {
+  const aspect = frame.width / frame.height;
+  if (aspect >= 1.5) {
+    return { columns: 24, rows: Math.max(5, Math.min(16, Math.round(24 / aspect))) };
+  }
+  return { columns: Math.max(6, Math.min(24, Math.round(16 * aspect))), rows: 16 };
+}
+
+function normalizePreviewColor(value, fallback) {
+  const color = String(value || '').trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(color) ? color : fallback;
+}
+
+export function assertCreationPublishReady(creation) {
+  const readiness = getCreationPublishReadiness(creation);
+  if (readiness.ready) return readiness;
+  const error = new Error(readiness.issues[0]?.message || 'Creation is not ready to publish.');
+  error.name = 'PublishValidationError';
+  error.code = 'PUBLISH_VALIDATION_FAILED';
+  error.issues = readiness.issues;
+  throw error;
+}
+
+export function createOwnerScopedSlug(title, existingSlugs = []) {
+  const base = slugify(title) || 'life-build';
+  const used = new Set(existingSlugs.map((slug) => String(slug || '').toLowerCase()));
+  if (!used.has(base)) return base;
+  let suffix = 2;
+  while (used.has(`${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
 }
 
 export function unpublishCreation(creation, { now = () => new Date().toISOString() } = {}) {
   return {
     ...creation,
     visibility: 'private',
+    canonicalUrl: null,
     publishedAt: null,
     updatedAt: now(),
   };
@@ -375,14 +582,14 @@ function getTrendingScore(creation, nowTimestamp) {
   );
 }
 
-function normalizeTags(tags) {
+function normalizeTags(tags, { limit = true } = {}) {
   const source = Array.isArray(tags) ? tags : String(tags || '').split(',');
   const seen = new Set();
 
   for (const tag of source) {
     const normalized = slugify(tag);
     if (normalized) seen.add(normalized);
-    if (seen.size >= 8) break;
+    if (limit && seen.size >= PUBLISH_LIMITS.tagMax) break;
   }
 
   return [...seen];

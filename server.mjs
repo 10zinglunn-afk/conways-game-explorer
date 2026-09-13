@@ -6,6 +6,7 @@ import { toNodeHandler } from 'better-auth/node';
 import { createBetterAuth, createPostgresPool } from './server/auth.mjs';
 import { getCommunityConfig, injectCommunityConfig, renderCommunityConfigScript } from './server/community-config.mjs';
 import { handleCommunityRequest } from './server/community-api.mjs';
+import { getPublicPageMetadata, injectPublicPageMetadata, matchPublicPage } from './server/public-page.mjs';
 
 const defaultHost = '127.0.0.1';
 const defaultPort = Number(process.env.PORT || 5173);
@@ -68,13 +69,19 @@ export function createRequestHandler({
         return;
       }
 
+      const publicRoute = matchPublicPage(url.pathname);
+      const appRoute = publicRoute || ['/studio', '/community', '/community/favorites'].includes(url.pathname);
       const cleanPath = normalize(url.pathname).replace(/^(\.\.[/\\])+/, '');
-      const filePath = join(root, cleanPath === '/' ? 'index.html' : cleanPath);
+      const filePath = join(root, cleanPath === '/' || appRoute ? 'index.html' : cleanPath);
       const file = await readFile(filePath);
       const isIndexHtml = filePath.endsWith('index.html');
-      const body = isIndexHtml
+      let body = isIndexHtml
         ? injectCommunityConfig(file.toString('utf8'), env)
         : file;
+      if (publicRoute) {
+        const metadata = await getPublicPageMetadata({ pathname: url.pathname, pool: databasePool, origin: url.origin });
+        body = injectPublicPageMetadata(body, metadata);
+      }
 
       response.writeHead(200, {
         'content-type': types[extname(filePath)] || 'application/octet-stream',

@@ -66,6 +66,15 @@ test('PostgreSQL browser repository preserves server errors for the UI', async (
   );
 });
 
+test('PostgreSQL browser errors retain status and structured retry details', async () => {
+  const repo = createPostgresCommunityRepository({
+    fetch: async () => response({ error: 'Slow down.', code: 'RATE_LIMITED', retryAfter: 60,
+      issues: [{ field: 'body', code: 'rate', message: 'Wait.' }] }, 429),
+  });
+  await assert.rejects(repo.loadCommunityState(), (error) => error.status === 429
+    && error.code === 'RATE_LIMITED' && error.retryAfter === 60 && error.issues.length === 1);
+});
+
 test('PostgreSQL browser repository uses same-origin cookies for password account actions', async () => {
   const calls = [];
   const repo = createPostgresCommunityRepository({

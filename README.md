@@ -49,7 +49,7 @@ production password-account setup are in [postgres/README.md](postgres/README.md
 The larger goal is a GitHub-like creative community for Game of Life machines:
 
 1. Stabilize the current Playground, Dev Lab, and local-first Community MVP.
-2. Apply and live-test the authored durable-version migration through the Better Auth + PostgreSQL server adapter; local repository and browser coverage is complete.
+2. Complete the validated publishing workflow. Shared client/server readiness checks, deterministic owner-scoped slugs, explicit publish states, selectable camera framing, accessible deterministic previews, and PostgreSQL public-row constraints are implemented; live migration/contract verification still needs a disposable `DATABASE_URL`.
 3. Move the app shell to Next.js while keeping the Life engine as pure reusable logic.
 4. Add public `/c/[slug]` and `/u/[username]` pages for SEO-indexable builds and profiles.
 5. Deploy through Cloudflare Workers with GitHub preview deployments.

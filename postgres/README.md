@@ -16,7 +16,8 @@ export BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
 export BETTER_AUTH_URL='http://127.0.0.1:5173'
 ```
 
-Apply the authored migration:
+Apply the authored migrations, including the Phase 2 publish-readiness and
+accessible-preview constraints:
 
 ```bash
 npm run db:migrate

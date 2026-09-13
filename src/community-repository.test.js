@@ -46,6 +46,25 @@ test('a new repository instance reloads state persisted by a previous one', asyn
   assert.equal(reloaded.creations.length, 1);
 });
 
+test('an import from one tab cannot delete a newer edit saved by another tab', async () => {
+  const storage = createMemoryStorage();
+  const first = createLocalCommunityRepository({ storage, now: FIXED_NOW });
+  const created = await first.saveCreation({ title: 'Build', rle: 'x = 1, y = 1, rule = B3/S23\no!', width: 1, height: 1, population: 1 });
+  const captured = await first.captureImportSnapshot(created.id);
+  const second = createLocalCommunityRepository({ storage, now: FIXED_NOW });
+  const edited = await second.saveVersion(created.id, { rle: 'x = 2, y = 1, rule = B3/S23\n2o!', width: 2, height: 1, population: 2 });
+
+  assert.notEqual(edited.importKey, captured.importKey);
+  const committed = await first.commitImportedSnapshot(created.id, captured, { cloudProjectId: 'cloud-1' });
+  assert.equal(committed.removed, false);
+
+  const reloaded = createLocalCommunityRepository({ storage, now: FIXED_NOW });
+  assert.equal(reloaded.findCreation(created.id).currentVersion.rle, 'x = 2, y = 1, rule = B3/S23\n2o!');
+});
+
+// Transaction aborts and concurrent-tab writes are exercised with real
+// IndexedDB in tests/browser/r2-regressions.spec.js, not an IndexedDB stub.
+
 test('createCommunityRepository selects the local backend by default', () => {
   const repo = createCommunityRepository({ storage: createMemoryStorage() });
   assert.equal(repo.backend, 'local');
@@ -230,6 +249,18 @@ test('migrateLocalState preserves local data when a cloud write fails', async ()
 
   assert.equal(localRepo.getState().profile.email, 'ada@example.com');
   assert.equal(localRepo.getState().creations.length, 2);
+});
+
+test('local import commit removes only the exact captured revision and retains its cloud mapping', async () => {
+  const repo = createLocalCommunityRepository({ storage: createMemoryStorage(), now: FIXED_NOW });
+  const creation = await repo.saveCreation({ title: 'Concurrent draft', rle: 'x = 1, y = 1, rule = B3/S23\no!' });
+  const snapshot = await repo.captureImportSnapshot(creation.id);
+  await repo.saveVersion(creation.id, { rle: 'x = 2, y = 1, rule = B3/S23\n2o!', width: 2, height: 1, population: 2 });
+  const mapping = { localProjectId: creation.id, cloudProjectId: 'cloud-1', versionIds: {} };
+  const committed = await repo.commitImportedSnapshot(creation.id, snapshot, mapping);
+  assert.equal(committed.removed, false);
+  assert.ok(repo.findCreation(creation.id));
+  assert.deepEqual(repo.getState().importMappings[creation.id], mapping);
 });
 
 function createRecordingCloudRepo({ failOnCreation = null } = {}) {
